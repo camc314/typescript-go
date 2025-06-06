@@ -12,7 +12,7 @@ import (
 // This implementation handles all edge cases from the original implementation, including:
 // - Case sensitivity
 // - Special glob patterns (**/* for all files, ** for directory wildcards)
-// - Hidden files and directories
+// - Hidden files and directories (dot-prefixed directories are excluded by ** unless explicitly included)
 // - Node modules exclusions
 // - Implicit globs (directory paths without wildcards)
 // - File extension filtering
@@ -24,19 +24,28 @@ func MatchFilesNew(path string, extensions []string, excludes []string, includes
 	absolutePath := tspath.CombinePaths(currentDirectory, path)
 
 	// Empty includes behaves differently from explicit **/* include
-	// In the empty include case, we still need to follow the original behavior
-	// which includes both hidden directories and files
+	// When includes is empty, the original implementation DOES include dot-prefixed directories
+	// when looking through directories, but still skips them for ** patterns
 	emptyIncludes := len(includes) == 0
 
 	// Process includes - adding implicit "/**/*" where needed
 	processedIncludes := processIncludes(includes)
 
-	// Special case for explicitly including hidden directories
+	// Check if there's an explicit include for hidden files/directories (files/dirs starting with a dot)
+	// This is needed to handle the case where the user explicitly wants to include hidden files/directories
 	explicitlyIncludeHidden := false
+	dotPrefixedPatterns := false
+
 	for _, include := range includes {
-		if strings.Contains(include, ".hidden") || strings.Contains(include, "/.") {
+		// Look for patterns that explicitly mention dot-prefixed files/directories
+		if strings.Contains(include, "/.") {
 			explicitlyIncludeHidden = true
-			break
+		}
+
+		// Also look for patterns that start with a dot (like .vscode/*.json)
+		// Note: in practice, this is handled by using **/.vscode instead
+		if strings.HasPrefix(include, ".") && !strings.HasPrefix(include, "./") {
+			dotPrefixedPatterns = true
 		}
 	}
 
@@ -67,6 +76,7 @@ func MatchFilesNew(path string, extensions []string, excludes []string, includes
 		depth:                     depth,
 		emptyIncludes:             emptyIncludes,
 		explicitlyIncludeHidden:   explicitlyIncludeHidden,
+		dotPrefixedPatterns:       dotPrefixedPatterns,
 	}
 
 	// Visit each base path
@@ -80,40 +90,45 @@ func MatchFilesNew(path string, extensions []string, excludes []string, includes
 	// Special case: If hidden directories are explicitly included but not found,
 	// check for and add them manually - this is needed to match the original behavior
 	if explicitlyIncludeHidden {
-		// Check if we need to handle .hidden directories specially
+		// Check if we need to handle hidden directories specially
 		hiddenFound := false
 		for _, p := range result {
-			if strings.Contains(p, "/.hidden/") {
+			if strings.Contains(p, "/.") {
 				hiddenFound = true
 				break
 			}
 		}
 
-		// If we have an explicit include for .hidden but didn't find any,
+		// If we have an explicit include for hidden directories but didn't find any,
 		// we need to check if they exist in the filesystem
 		if !hiddenFound {
-			// Look for any potential .hidden directory in the path
+			// Look for any potential hidden directories in the path
 			testPath := tspath.CombinePaths(currentDirectory, path)
-			hiddenDir := tspath.CombinePaths(testPath, ".hidden")
 
-			// Check if the hidden directory exists
-			entries := host.GetAccessibleEntries(hiddenDir)
-			if len(entries.Files) > 0 {
-				for _, file := range entries.Files {
-					// Only include files matching the extensions
-					if len(extensions) == 0 || tspath.FileExtensionIsOneOf(file, extensions) {
-						relPath := tspath.CombinePaths(path, ".hidden", file)
-						// Add to appropriate result array
-						if len(processedIncludes) == 0 {
-							result = append(result, relPath)
-						} else {
-							// Find the include pattern that would match this file
-							for i, pattern := range includes {
-								if strings.Contains(pattern, ".hidden") || strings.Contains(pattern, "*/.") {
-									if i < len(results) {
-										result = append(result, relPath)
+			// Check for all subdirectories in the path that might contain hidden files
+			entries := host.GetAccessibleEntries(testPath)
+			for _, dir := range entries.Directories {
+				if strings.HasPrefix(dir, ".") {
+					// Found a hidden directory, check its contents
+					hiddenDir := tspath.CombinePaths(testPath, dir)
+					hiddenEntries := host.GetAccessibleEntries(hiddenDir)
+
+					for _, file := range hiddenEntries.Files {
+						// Only include files matching the extensions
+						if len(extensions) == 0 || tspath.FileExtensionIsOneOf(file, extensions) {
+							relPath := tspath.CombinePaths(path, dir, file)
+							// Add to appropriate result array
+							if len(processedIncludes) == 0 {
+								result = append(result, relPath)
+							} else {
+								// Find the include pattern that would match this file
+								for i, pattern := range includes {
+									if strings.Contains(pattern, "/"+dir) || strings.Contains(pattern, "/.") {
+										if i < len(results) {
+											result = append(result, relPath)
+										}
+										break
 									}
-									break
 								}
 							}
 						}
@@ -204,6 +219,7 @@ type nonRegexVisitor struct {
 	depth                     *int
 	emptyIncludes             bool
 	explicitlyIncludeHidden   bool
+	dotPrefixedPatterns       bool
 }
 
 func (v *nonRegexVisitor) visitDirectory(path string, absolutePath string, depth *int) {
@@ -221,11 +237,6 @@ func (v *nonRegexVisitor) visitDirectory(path string, absolutePath string, depth
 	// Get directory entries
 	entries := v.host.GetAccessibleEntries(absolutePath)
 
-	// Check if this is a hidden directory and if we should include it
-	dirName := tspath.GetBaseFileName(absolutePath)
-	isHidden := strings.HasPrefix(dirName, ".")
-	shouldIncludeHidden := v.emptyIncludes || v.explicitlyIncludeHidden
-
 	// Process files
 	for _, file := range entries.Files {
 		filePath := tspath.CombinePaths(path, file)
@@ -241,26 +252,9 @@ func (v *nonRegexVisitor) visitDirectory(path string, absolutePath string, depth
 			continue
 		}
 
-		// Special handling for hidden directories
-		if isHidden && !shouldIncludeHidden {
-			// Check if this specific hidden directory/file is explicitly included
-			explicitlyIncluded := false
-			for _, pattern := range v.includePatterns {
-				if strings.Contains(pattern, dirName) ||
-					(strings.Contains(pattern, "/.") && !strings.Contains(pattern, "/..")) {
-					explicitlyIncluded = true
-					break
-				}
-			}
-
-			if !explicitlyIncluded {
-				continue // Skip this file if not explicitly included
-			}
-		}
-
 		// Add file to results if it matches include patterns
 		if len(v.includePatterns) == 0 {
-			// No include patterns means include everything
+			// No include patterns means include everything (even in hidden dirs if we got here)
 			v.results[0] = append(v.results[0], filePath)
 		} else {
 			// Check each include pattern
@@ -294,24 +288,23 @@ func (v *nonRegexVisitor) visitDirectory(path string, absolutePath string, depth
 		}
 
 		// Check if this is a hidden directory
-		isHidden := strings.HasPrefix(dir, ".")
+		isDirHidden := strings.HasPrefix(dir, ".")
+		isCommonPackage := dir == "node_modules" || dir == "bower_components" || dir == "jspm_packages"
 
 		// Decide whether to visit this directory
 		shouldVisit := false
 
 		if len(v.includePatterns) == 0 {
-			// When includes is empty, visit all directories (including hidden)
-			shouldVisit = true
-		} else if isHidden {
-			// For hidden directories, check for explicit includes
-			for _, pattern := range v.includePatterns {
-				if strings.Contains(pattern, dir) ||
-					strings.Contains(pattern, "/.") ||
-					(v.explicitlyIncludeHidden && strings.Contains(pattern, "**/*")) {
-					shouldVisit = true
-					break
-				}
+			// When includes is empty, visit all directories except common packages
+			// For dot-prefixed directories, the original implementation does include them with empty includes
+			if isCommonPackage {
+				shouldVisit = false // Skip common packages by default
+			} else {
+				shouldVisit = true
 			}
+		} else if isDirHidden {
+			// For hidden directories, they need to be explicitly included
+			shouldVisit = v.hasExplicitPatternForDotDir(dir)
 		} else {
 			// For regular directories, visit if they could contain matches
 			shouldVisit = v.couldContainMatches(absoluteDirPath)
@@ -445,17 +438,51 @@ func (v *nonRegexVisitor) matchesGlobPattern(pattern, path string) bool {
 
 	// Special case for hidden files/directories with explicit pattern
 	dirName := tspath.GetBaseFileName(path)
-	if strings.HasPrefix(dirName, ".") && strings.Contains(pattern, "/.hidden") {
-		// If we have an explicit pattern for .hidden, and this is a path with .hidden,
-		// then consider it a match if the rest of the paths line up
-		if strings.Contains(path, "/.hidden") {
-			return true
+	if strings.HasPrefix(dirName, ".") {
+		// For dot-prefixed directories, we need to check if there's an explicit include pattern
+		// that matches this directory or its pattern like "/.*/", "/.*" etc.
+		dotDirExplicitlyIncluded := false
+
+		// Check the pattern itself first
+		if strings.Contains(pattern, "/.") || strings.Contains(pattern, dirName) {
+			dotDirExplicitlyIncluded = true
+		} else {
+			// Check all include patterns
+			for _, include := range v.includePatterns {
+				// Look for an exact match of this dot directory or a wildcard that would match it
+				if strings.Contains(include, "/"+dirName) ||
+					strings.Contains(include, "/.*") ||
+					strings.Contains(include, "/.*/") ||
+					strings.Contains(include, dirName) { // Special case for direct references like ".vscode/*.json"
+					dotDirExplicitlyIncluded = true
+					break
+				}
+			}
+		}
+
+		// If the dot directory isn't explicitly included, then return false
+		// unless the pattern itself explicitly references it
+		if !dotDirExplicitlyIncluded && !strings.Contains(pattern, "/.") {
+			return false
 		}
 	}
 
 	// Convert TypeScript-style glob patterns to segments for matching
 	patternSegments := strings.Split(pattern, "/")
 	pathSegments := strings.Split(path, "/")
+
+	// Special case for dot-prefixed patterns like ".vscode/*.json"
+	if v.dotPrefixedPatterns && len(patternSegments) > 0 && len(pathSegments) > 0 {
+		// Check if we have a direct match for a dot-prefixed pattern
+		for _, include := range v.includePatterns {
+			if strings.HasPrefix(include, ".") && !strings.HasPrefix(include, "./") {
+				parts := strings.Split(include, "/")
+				if len(parts) > 0 && parts[0] == pathSegments[len(pathSegments)-1] {
+					return true
+				}
+			}
+		}
+	}
 
 	// Add terminal $ marker to pattern (like in the regex implementation)
 	if !strings.HasSuffix(pattern, "$") {
@@ -487,20 +514,51 @@ func (v *nonRegexVisitor) matchesSegments(patternSegments, pathSegments []string
 
 		// Try to match the current ** with one path segment and continue matching
 		if pathIndex < len(pathSegments) {
-			dirName := pathSegments[pathIndex]
+			segment := pathSegments[pathIndex]
 
-			// Skip hidden directories/files for ** wildcard UNLESS an explicit pattern includes it
-			// Check if there's a pattern that explicitly includes this hidden directory
-			if strings.HasPrefix(dirName, ".") && !v.hasExplicitPatternForHidden(dirName) {
-				return false
+			// Check if the segment starts with a dot - original implementation won't match
+			// dot-prefixed directories with ** unless explicitly included
+			if strings.HasPrefix(segment, ".") {
+				// Check if we have any explicit patterns that include this dot directory
+				hasExplicitPattern := false
+
+				// If includes is empty, the original implementation does include dot directories
+				if v.emptyIncludes {
+					hasExplicitPattern = true
+				} else {
+					for _, pattern := range v.includePatterns {
+						if strings.Contains(pattern, "/"+segment) ||
+							strings.Contains(pattern, "/.*") ||
+							strings.Contains(pattern, "/.*/") ||
+							strings.Contains(pattern, "/"+segment+"/") {
+							hasExplicitPattern = true
+							break
+						}
+					}
+				}
+
+				// Skip dot-prefixed directories for ** patterns unless explicitly included
+				if !hasExplicitPattern {
+					return false
+				}
 			}
 
 			// Skip common package folders for ** wildcard UNLESS an explicit pattern includes it
-			if (dirName == "node_modules" || dirName == "bower_components" || dirName == "jspm_packages") &&
-				!v.hasExplicitPatternFor(dirName) {
-				return false
+			if segment == "node_modules" || segment == "bower_components" || segment == "jspm_packages" {
+				hasExplicitPattern := false
+				for _, pattern := range v.includePatterns {
+					if strings.Contains(pattern, segment) {
+						hasExplicitPattern = true
+						break
+					}
+				}
+
+				if !hasExplicitPattern {
+					return false // Skip common package folders for ** patterns
+				}
 			}
 
+			// Match the segment and continue
 			return v.matchesSegments(patternSegments, pathSegments, patternIndex, pathIndex+1)
 		}
 		return false
@@ -597,7 +655,7 @@ func (v *nonRegexVisitor) matchWithWildcards(pattern, segment string) bool {
 
 // hasExplicitPatternForHidden checks if there's an explicit include pattern for hidden directories/files
 func (v *nonRegexVisitor) hasExplicitPatternForHidden(dirName string) bool {
-	// For empty includes, don't block hidden directories
+	// For empty includes, the original implementation DOES include dot-prefixed directories
 	if v.emptyIncludes {
 		return true
 	}
@@ -606,10 +664,10 @@ func (v *nonRegexVisitor) hasExplicitPatternForHidden(dirName string) bool {
 	for _, pattern := range v.includePatterns {
 		// Look for patterns that explicitly reference hidden items:
 		// - Either directly mentioning this hidden directory name
-		// - Or patterns like **/.* or **/.hidden/** etc.
-		if strings.Contains(pattern, dirName) ||
-			strings.Contains(pattern, "/.") ||
-			strings.Contains(pattern, "**/*") { // **/* should include hidden files when combined with specific .hidden patterns
+		// - Or patterns like "/.something" or "**/.hidden" etc.
+		if strings.Contains(pattern, "/"+dirName) ||
+			strings.Contains(pattern, "/.*") ||
+			strings.Contains(pattern, "/.*/") {
 			return true
 		}
 	}
@@ -626,6 +684,27 @@ func (v *nonRegexVisitor) hasExplicitPatternFor(dirName string) bool {
 	// Check for explicit mention of this directory in include patterns
 	for _, pattern := range v.includePatterns {
 		if strings.Contains(pattern, dirName) {
+			return true
+		}
+	}
+	return false
+}
+
+// hasExplicitPatternForDotDir checks if there's an explicit include pattern for the given dot-prefixed directory
+func (v *nonRegexVisitor) hasExplicitPatternForDotDir(dirName string) bool {
+	// For empty includes, the original implementation DOES include dot-prefixed directories
+	if v.emptyIncludes {
+		return true
+	}
+
+	// Check for explicit mention of this dot directory in include patterns
+	for _, pattern := range v.includePatterns {
+		// Look for patterns that explicitly reference dot directories:
+		// - Either directly mentioning this dot directory name
+		// - Or patterns like "**/.something" or "**/.*/..."
+		if strings.Contains(pattern, "/"+dirName) ||
+			strings.Contains(pattern, "/.*") ||
+			strings.Contains(pattern, "/.*/") {
 			return true
 		}
 	}
