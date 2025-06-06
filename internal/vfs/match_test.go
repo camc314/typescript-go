@@ -276,7 +276,7 @@ func TestMatchFilesVsMatchFilesNew(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			expected := vfs.ReadDirectory(fs, "/", tc.path, tc.exts, tc.excludes, tc.includes, tc.depth)
+			expected := vfs.MatchFiles(tc.path, tc.exts, tc.excludes, tc.includes, fs.UseCaseSensitiveFileNames(), "/", tc.depth, fs)
 
 			// Directly call matchFilesNew with the same parameters
 			actual := vfs.MatchFilesNew(tc.path, tc.exts, tc.excludes, tc.includes, fs.UseCaseSensitiveFileNames(), "/", tc.depth, fs)
@@ -675,7 +675,7 @@ func BenchmarkMatchFiles(b *testing.B) {
 			b.ReportAllocs()
 
 			for b.Loop() {
-				vfs.ReadDirectory(testFS, currentDirectory, bc.path, bc.exts, bc.excludes, bc.includes, depth)
+				vfs.MatchFiles(bc.path, bc.exts, bc.excludes, bc.includes, testFS.UseCaseSensitiveFileNames(), currentDirectory, depth, testFS)
 			}
 		})
 
@@ -736,7 +736,7 @@ func BenchmarkMatchFilesLarge(b *testing.B) {
 			b.ReportAllocs()
 
 			for b.Loop() {
-				vfs.ReadDirectory(fs, currentDirectory, bc.path, bc.exts, bc.excludes, bc.includes, depth)
+				vfs.MatchFiles(bc.path, bc.exts, bc.excludes, bc.includes, fs.UseCaseSensitiveFileNames(), currentDirectory, depth, fs)
 			}
 		})
 
@@ -903,7 +903,7 @@ func TestDotPrefixedDirectoryMatching(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Get results from both implementations for comparison
-			expected := vfs.ReadDirectory(fs, "/", tc.path, tc.exts, tc.excludes, tc.includes, nil)
+			expected := vfs.MatchFiles(tc.path, tc.exts, tc.excludes, tc.includes, fs.UseCaseSensitiveFileNames(), "/", nil, fs)
 			actual := vfs.MatchFilesNew(tc.path, tc.exts, tc.excludes, tc.includes, fs.UseCaseSensitiveFileNames(), "/", nil, fs)
 
 			// Print the results for debugging
@@ -1125,7 +1125,7 @@ func TestMatchFilesNewAdditionalPatterns(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			actual := vfs.MatchFilesNew(tc.path, tc.exts, tc.excludes, tc.includes, fs.UseCaseSensitiveFileNames(), "/", nil, fs)
 			// Get results from original implementation for debugging
-			original := vfs.ReadDirectory(fs, "/", tc.path, tc.exts, tc.excludes, tc.includes, nil)
+			original := vfs.MatchFiles(tc.path, tc.exts, tc.excludes, tc.includes, fs.UseCaseSensitiveFileNames(), "/", nil, fs)
 
 			// Print the results for debugging
 			t.Logf("Original implementation results for %s:", tc.name)
@@ -1300,7 +1300,7 @@ func TestDotPrefixedDirectoryAdditionalPatterns(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			actual := vfs.MatchFilesNew(tc.path, tc.exts, tc.excludes, tc.includes, fs.UseCaseSensitiveFileNames(), "/", nil, fs)
-			original := vfs.ReadDirectory(fs, "/", tc.path, tc.exts, tc.excludes, tc.includes, nil)
+			original := vfs.MatchFiles(tc.path, tc.exts, tc.excludes, tc.includes, fs.UseCaseSensitiveFileNames(), "/", nil, fs)
 
 			// Print the results for debugging
 			t.Logf("Original implementation results for %s:", tc.name)

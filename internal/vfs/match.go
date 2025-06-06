@@ -326,7 +326,18 @@ func (v *nonRegexVisitor) isExcluded(path string) bool {
 		// For excludes, we need to normalize the pattern and path for matching
 		absolutePattern := tspath.CombinePaths(v.basePath, pattern)
 
-		// Special handling for exclude patterns: they match if the path starts with the pattern
+		// Normalize the paths for comparison
+		normalizedPath := tspath.NormalizePath(path)
+		normalizedPattern := tspath.NormalizePath(absolutePattern)
+
+		// Special case for excluding entire directories:
+		// If the exclude pattern exactly matches a directory, we should exclude all files under it
+		if normalizedPath == normalizedPattern || 
+		   strings.HasPrefix(normalizedPath, normalizedPattern+"/") {
+			return true
+		}
+
+		// Also check the regular glob pattern matching
 		if v.matchesGlobPattern(absolutePattern, path) {
 			return true
 		}

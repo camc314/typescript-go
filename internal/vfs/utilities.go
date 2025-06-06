@@ -413,7 +413,7 @@ func (v *visitor) visitDirectory(
 }
 
 // path is the directory of the tsconfig.json
-func matchFiles(path string, extensions []string, excludes []string, includes []string, useCaseSensitiveFileNames bool, currentDirectory string, depth *int, host FS) []string {
+func MatchFiles(path string, extensions []string, excludes []string, includes []string, useCaseSensitiveFileNames bool, currentDirectory string, depth *int, host FS) []string {
 	path = tspath.NormalizePath(path)
 	currentDirectory = tspath.NormalizePath(currentDirectory)
 
@@ -460,5 +460,5 @@ func matchFiles(path string, extensions []string, excludes []string, includes []
 }
 
 func ReadDirectory(host FS, currentDir string, path string, extensions []string, excludes []string, includes []string, depth *int) []string {
-	return matchFiles(path, extensions, excludes, includes, host.UseCaseSensitiveFileNames(), currentDir, depth, host)
+	return MatchFilesNew(path, extensions, excludes, includes, host.UseCaseSensitiveFileNames(), currentDir, depth, host)
 }
