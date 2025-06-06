@@ -980,3 +980,361 @@ func TestDotPrefixedDirectoryMatching(t *testing.T) {
 		})
 	}
 }
+
+func TestMatchFilesNewAdditionalPatterns(t *testing.T) {
+	// Create a file system with additional patterns found in real TypeScript tests
+	fs := vfstest.FromMap(map[string]any{
+		// Regular structure
+		"/src/index.ts":   "export * from './lib';",
+		"/src/lib.ts":     "export const lib = {};",
+		"/src/app.ts":     "export const app = {};",
+		"/src/types.d.ts": "export declare const types: any;",
+
+		// Windows-style paths with backslashes (from nodeNextModuleKindCaching1.ts)
+		"/src/components/button.ts": "export const Button = () => ({});",
+		"/src/components/input.ts":  "export const Input = () => ({});",
+		"/src/components/form.ts":   "export const Form = () => ({});",
+
+		// Node modules structure
+		"/node_modules/pkg1/index.js":      "module.exports = {};",
+		"/node_modules/pkg1/types.d.ts":    "export {};",
+		"/node_modules/pkg2/index.js":      "module.exports = {};",
+		"/node_modules/m1/index.js":        "module.exports = {};",
+		"/node_modules/m2/index.js":        "module.exports = {};",
+		"/node_modules/m2/nested/index.js": "module.exports = {};",
+
+		// Special directories
+		"/test/unit/test1.ts":        "describe('test1', () => {});",
+		"/test/integration/test2.ts": "describe('test2', () => {});",
+		"/shared/utils.ts":           "export const utils = {};",
+		"/dist/index.js":             "console.log('output');",
+
+		// Empty directory (represented by a marker file)
+		"/empty/marker.txt": "",
+
+		// Files in the root
+		"/tsconfig.json": "{ \"compilerOptions\": {} }",
+		"/package.json":  "{ \"name\": \"test\" }",
+	}, true)
+
+	testCases := []struct {
+		name     string
+		path     string
+		exts     []string
+		excludes []string
+		includes []string
+		expected []string
+	}{
+		{
+			name:     "Windows backslash patterns",
+			path:     "/",
+			exts:     []string{".ts"},
+			excludes: nil,
+			includes: []string{"src\\**\\*.ts"},
+			expected: []string{
+				"/src/index.ts",
+				"/src/lib.ts",
+				"/src/app.ts",
+				"/src/types.d.ts",
+				"/src/components/button.ts",
+				"/src/components/input.ts",
+				"/src/components/form.ts",
+			},
+		},
+		{
+			name:     "NodeModulesSearch maxDepthExceeded pattern",
+			path:     "/",
+			exts:     []string{".js"},
+			excludes: []string{"node_modules/m2/**/*"},
+			includes: []string{"**/*", "node_modules/**/*"},
+			expected: []string{
+				"/node_modules/pkg1/index.js",
+				"/node_modules/pkg2/index.js",
+				"/node_modules/m1/index.js",
+				// m2 should be excluded
+				"/dist/index.js",
+			},
+		},
+		{
+			name:     "Empty includes array",
+			path:     "/src",
+			exts:     []string{".ts"},
+			excludes: nil,
+			includes: []string{},
+			expected: []string{
+				"/src/index.ts",
+				"/src/lib.ts",
+				"/src/app.ts",
+				"/src/types.d.ts",
+				"/src/components/button.ts",
+				"/src/components/input.ts",
+				"/src/components/form.ts",
+			},
+		},
+		{
+			name:     "Relative path outside project",
+			path:     "/src",
+			exts:     []string{".ts"},
+			excludes: nil,
+			includes: []string{"../shared/**"},
+			expected: []string{
+				"/shared/utils.ts",
+			},
+		},
+		{
+			name:     "Cross-project includes",
+			path:     "/",
+			exts:     []string{".ts"},
+			excludes: nil,
+			includes: []string{"src", "../../shared"},
+			expected: []string{
+				"/src/index.ts",
+				"/src/lib.ts",
+				"/src/app.ts",
+				"/src/types.d.ts",
+				"/src/components/button.ts",
+				"/src/components/input.ts",
+				"/src/components/form.ts",
+				"/shared/utils.ts", // Include this because both implementations include it
+			},
+		},
+		{
+			name:     "Directory pattern without extension",
+			path:     "/",
+			exts:     []string{".ts", ".txt"},
+			excludes: nil,
+			includes: []string{"empty"},
+			expected: []string{
+				"/empty/marker.txt",
+			},
+		},
+		{
+			name:     "Multiple file extensions in pattern",
+			path:     "/",
+			exts:     []string{".ts", ".json"},
+			excludes: nil,
+			includes: []string{"/*.json"},
+			expected: []string{
+				"/tsconfig.json",
+				"/package.json",
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			actual := vfs.MatchFilesNew(tc.path, tc.exts, tc.excludes, tc.includes, fs.UseCaseSensitiveFileNames(), "/", nil, fs)
+			// Get results from original implementation for debugging
+			original := vfs.ReadDirectory(fs, "/", tc.path, tc.exts, tc.excludes, tc.includes, nil)
+
+			// Print the results for debugging
+			t.Logf("Original implementation results for %s:", tc.name)
+			for _, file := range original {
+				t.Logf("  %s", file)
+			}
+			t.Logf("New implementation results for %s:", tc.name)
+			for _, file := range actual {
+				t.Logf("  %s", file)
+			}
+
+			// Check that all expected files are in the results
+			for _, expectedFile := range tc.expected {
+				foundInActual := false
+				for _, file := range actual {
+					if file == expectedFile {
+						foundInActual = true
+						break
+					}
+				}
+				// If expected array is empty, skip this check
+				if len(tc.expected) > 0 {
+					assert.Assert(t, foundInActual, "Expected file %s not found in results", expectedFile)
+				}
+			}
+
+			// Check that no unexpected files are in the results
+			if len(tc.expected) > 0 {
+				for _, file := range actual {
+					foundInExpected := false
+					for _, expectedFile := range tc.expected {
+						if file == expectedFile {
+							foundInExpected = true
+							break
+						}
+					}
+					assert.Assert(t, foundInExpected, "Unexpected file %s found in results", file)
+				}
+
+				// Simple length check as a sanity check
+				assert.Equal(t, len(tc.expected), len(actual), "number of files matched")
+			}
+		})
+	}
+}
+
+func TestDotPrefixedDirectoryAdditionalPatterns(t *testing.T) {
+	// Create a file system with more dot-prefixed directories and nested structures
+	fs := vfstest.FromMap(map[string]any{
+		// Root level dot directories
+		"/.git/HEAD":                "ref: refs/heads/main",
+		"/.git/index":               "git index file",
+		"/.git/objects/00/123456":   "git object",
+		"/.vscode/settings.json":    "{ \"typescript.enable\": true }",
+		"/.vscode/extensions.json":  "{ \"recommendations\": [\"ms-typescript.typescript-language-features\"] }",
+		"/.github/workflows/ci.yml": "name: CI",
+
+		// Nested dot directories
+		"/src/.test/fixtures/test1.ts": "export const test1 = true;",
+		"/src/.test/helpers/setup.ts":  "export const setup = () => {};",
+		"/tests/.results/report.xml":   "<?xml version=\"1.0\"?>",
+		"/tests/.coverage/lcov.info":   "SF:src/index.ts",
+
+		// Multiple levels of dot directories
+		"/src/.config/.env/development.ts": "export const ENV = 'development';",
+		"/src/.config/.env/production.ts":  "export const ENV = 'production';",
+
+		// Dot directories inside node_modules
+		"/node_modules/.bin/tsc":            "#!/bin/bash",
+		"/node_modules/.cache/babel/123456": "babel cache",
+		"/node_modules/pkg/.npmignore":      "*.log",
+
+		// Normal files for comparison
+		"/src/index.ts":           "export * from './app';",
+		"/src/app.ts":             "export const app = {};",
+		"/tests/unit/app.test.ts": "import { app } from '../../src/app';",
+	}, true)
+
+	testCases := []struct {
+		name       string
+		path       string
+		exts       []string
+		excludes   []string
+		includes   []string
+		expected   []string
+		unexpected []string
+	}{
+		{
+			name:     "GitHub workflow pattern",
+			path:     "/",
+			exts:     []string{".yml", ".json"},
+			excludes: nil,
+			includes: []string{"**/.github/workflows/**"},
+			expected: []string{
+				"/.github/workflows/ci.yml",
+			},
+			unexpected: []string{
+				"/.vscode/settings.json",
+				"/.vscode/extensions.json",
+				"/.git/HEAD",
+			},
+		},
+		{
+			name:     "Multiple dot directory levels",
+			path:     "/",
+			exts:     []string{".ts"},
+			excludes: nil,
+			includes: []string{"**/.config/.env/**"},
+			expected: []string{
+				"/src/.config/.env/development.ts",
+				"/src/.config/.env/production.ts",
+			},
+			unexpected: []string{
+				"/src/index.ts",
+				"/src/app.ts",
+				"/src/.test/fixtures/test1.ts",
+			},
+		},
+		{
+			name:     "Complex pattern with multiple dot directories",
+			path:     "/",
+			exts:     []string{".ts", ".json", ".yml"},
+			excludes: []string{"**/.git/**", "**/node_modules/**"},
+			includes: []string{"**/*", "**/.vscode/**", "**/.github/**", "**/.test/**"},
+			expected: []string{
+				"/src/index.ts",
+				"/src/app.ts",
+				"/tests/unit/app.test.ts",
+				"/.vscode/settings.json",
+				"/.vscode/extensions.json",
+				"/.github/workflows/ci.yml",
+				"/src/.test/fixtures/test1.ts",
+				"/src/.test/helpers/setup.ts",
+			},
+			unexpected: []string{
+				"/.git/HEAD",
+				"/.git/index",
+				"/node_modules/.bin/tsc",
+				"/node_modules/.cache/babel/123456",
+			},
+		},
+		{
+			name:     "Include only specific dot directory files",
+			path:     "/",
+			exts:     []string{".json"},
+			excludes: nil,
+			includes: []string{"**/.vscode/*.json"},
+			expected: []string{
+				"/.vscode/settings.json",
+				"/.vscode/extensions.json",
+			},
+			unexpected: []string{
+				"/.github/workflows/ci.yml",
+			},
+		},
+		{
+			name:     "Test results pattern",
+			path:     "/",
+			exts:     []string{".xml", ".info"},
+			excludes: nil,
+			includes: []string{"**/.results/**", "**/.coverage/**"},
+			expected: []string{
+				"/tests/.results/report.xml",
+				"/tests/.coverage/lcov.info",
+			},
+			unexpected: []string{
+				"/.vscode/settings.json",
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			actual := vfs.MatchFilesNew(tc.path, tc.exts, tc.excludes, tc.includes, fs.UseCaseSensitiveFileNames(), "/", nil, fs)
+			original := vfs.ReadDirectory(fs, "/", tc.path, tc.exts, tc.excludes, tc.includes, nil)
+
+			// Print the results for debugging
+			t.Logf("Original implementation results for %s:", tc.name)
+			for _, file := range original {
+				t.Logf("  %s", file)
+			}
+			t.Logf("New implementation results for %s:", tc.name)
+			for _, file := range actual {
+				t.Logf("  %s", file)
+			}
+
+			// Check that all expected files are in the results
+			for _, expectedFile := range tc.expected {
+				foundInActual := false
+				for _, file := range actual {
+					if file == expectedFile {
+						foundInActual = true
+						break
+					}
+				}
+				assert.Assert(t, foundInActual, "Expected file %s not found in results", expectedFile)
+			}
+
+			// Check that unexpected files are not in the results
+			for _, unexpectedFile := range tc.unexpected {
+				foundInActual := false
+				for _, file := range actual {
+					if file == unexpectedFile {
+						foundInActual = true
+						break
+					}
+				}
+				assert.Assert(t, !foundInActual, "Unexpected file %s found in results", unexpectedFile)
+			}
+		})
+	}
+}
