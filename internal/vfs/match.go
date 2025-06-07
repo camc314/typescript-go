@@ -332,8 +332,8 @@ func (v *nonRegexVisitor) isExcluded(path string) bool {
 
 		// Special case for excluding entire directories:
 		// If the exclude pattern exactly matches a directory, we should exclude all files under it
-		if normalizedPath == normalizedPattern || 
-		   strings.HasPrefix(normalizedPath, normalizedPattern+"/") {
+		if normalizedPath == normalizedPattern ||
+			strings.HasPrefix(normalizedPath, normalizedPattern+"/") {
 			return true
 		}
 
