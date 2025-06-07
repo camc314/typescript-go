@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/microsoft/typescript-go/internal/vfs"
+	"github.com/microsoft/typescript-go/internal/vfs/cachedvfs"
 	"github.com/microsoft/typescript-go/internal/vfs/vfstest"
 	"gotest.tools/v3/assert"
 )
@@ -670,13 +671,15 @@ func BenchmarkMatchFiles(b *testing.B) {
 
 	for _, bc := range benchCases {
 		// Create the appropriate file system for this benchmark case
-		testFS := bc.useFS(true)
+		fs := bc.useFS(true)
+		// Wrap with cached FS for the benchmark
+		fs = cachedvfs.From(fs)
 
 		b.Run(bc.name+"/Original", func(b *testing.B) {
 			b.ReportAllocs()
 
 			for b.Loop() {
-				vfs.MatchFiles(bc.path, bc.exts, bc.excludes, bc.includes, testFS.UseCaseSensitiveFileNames(), currentDirectory, depth, testFS)
+				vfs.MatchFiles(bc.path, bc.exts, bc.excludes, bc.includes, fs.UseCaseSensitiveFileNames(), currentDirectory, depth, fs)
 			}
 		})
 
@@ -684,7 +687,7 @@ func BenchmarkMatchFiles(b *testing.B) {
 			b.ReportAllocs()
 
 			for b.Loop() {
-				vfs.MatchFilesNew(bc.path, bc.exts, bc.excludes, bc.includes, testFS.UseCaseSensitiveFileNames(), currentDirectory, depth, testFS)
+				vfs.MatchFilesNew(bc.path, bc.exts, bc.excludes, bc.includes, fs.UseCaseSensitiveFileNames(), currentDirectory, depth, fs)
 			}
 		})
 	}
@@ -692,6 +695,8 @@ func BenchmarkMatchFiles(b *testing.B) {
 
 func BenchmarkMatchFilesLarge(b *testing.B) {
 	fs := setupLargeTestFS(true)
+	// Wrap with cached FS for the benchmark
+	fs = cachedvfs.From(fs)
 	currentDirectory := "/"
 	var depth *int = nil
 
