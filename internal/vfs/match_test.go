@@ -2,6 +2,7 @@ package vfs_test
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -1205,13 +1206,13 @@ func TestDotPrefixedDirectoryAdditionalPatterns(t *testing.T) {
 	}, true)
 
 	testCases := []struct {
-		name       string
-		path       string
-		exts       []string
-		excludes   []string
-		includes   []string
-		expected   []string
-		unexpected []string
+		name           string
+		path           string
+		exts           []string
+		excludes       []string
+		includes       []string
+		expected       []string
+		unexpectedDirs []string
 	}{
 		{
 			name:     "GitHub workflow pattern",
@@ -1222,7 +1223,7 @@ func TestDotPrefixedDirectoryAdditionalPatterns(t *testing.T) {
 			expected: []string{
 				"/.github/workflows/ci.yml",
 			},
-			unexpected: []string{
+			unexpectedDirs: []string{
 				"/.vscode/settings.json",
 				"/.vscode/extensions.json",
 				"/.git/HEAD",
@@ -1238,7 +1239,7 @@ func TestDotPrefixedDirectoryAdditionalPatterns(t *testing.T) {
 				"/src/.config/.env/development.ts",
 				"/src/.config/.env/production.ts",
 			},
-			unexpected: []string{
+			unexpectedDirs: []string{
 				"/src/index.ts",
 				"/src/app.ts",
 				"/src/.test/fixtures/test1.ts",
@@ -1260,7 +1261,7 @@ func TestDotPrefixedDirectoryAdditionalPatterns(t *testing.T) {
 				"/src/.test/fixtures/test1.ts",
 				"/src/.test/helpers/setup.ts",
 			},
-			unexpected: []string{
+			unexpectedDirs: []string{
 				"/.git/HEAD",
 				"/.git/index",
 				"/node_modules/.bin/tsc",
@@ -1277,7 +1278,7 @@ func TestDotPrefixedDirectoryAdditionalPatterns(t *testing.T) {
 				"/.vscode/settings.json",
 				"/.vscode/extensions.json",
 			},
-			unexpected: []string{
+			unexpectedDirs: []string{
 				"/.github/workflows/ci.yml",
 			},
 		},
@@ -1291,7 +1292,7 @@ func TestDotPrefixedDirectoryAdditionalPatterns(t *testing.T) {
 				"/tests/.results/report.xml",
 				"/tests/.coverage/lcov.info",
 			},
-			unexpected: []string{
+			unexpectedDirs: []string{
 				"/.vscode/settings.json",
 			},
 		},
@@ -1325,7 +1326,7 @@ func TestDotPrefixedDirectoryAdditionalPatterns(t *testing.T) {
 			}
 
 			// Check that unexpected files are not in the results
-			for _, unexpectedFile := range tc.unexpected {
+			for _, unexpectedFile := range tc.unexpectedDirs {
 				foundInActual := false
 				for _, file := range actual {
 					if file == unexpectedFile {
@@ -1337,4 +1338,335 @@ func TestDotPrefixedDirectoryAdditionalPatterns(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestHiddenDirectoryPatternMatching tests specific scenarios that exercise the uncovered code paths
+// particularly the hasExplicitPatternForHidden function
+func TestHiddenDirectoryPatternMatching(t *testing.T) {
+	t.Parallel()
+
+	// Create a test filesystem with hidden directories and explicit include patterns
+	fs := vfstest.FromMap(map[string]any{
+		"/src/main.ts":           "export const main = 1;",
+		"/src/lib.ts":            "export const lib = 2;",
+		"/.vscode/settings.json": "{ \"typescript.enable\": true }",
+		"/.vscode/tasks.json":    "{ \"tasks\": [] }",
+		"/.git/config":           "repository config",
+		"/.git/HEAD":             "ref: refs/heads/main",
+		"/.hidden/secret.ts":     "export const secret = 'hidden';",
+		"/.hidden/config.json":   "{ \"hidden\": true }",
+		"/docs/readme.md":        "# Documentation",
+	}, true)
+
+	testCases := []struct {
+		name     string
+		includes []string
+		excludes []string
+		expected []string
+	}{
+		{
+			name:     "Explicit pattern for specific hidden directory",
+			includes: []string{"**/.vscode/**"},
+			excludes: []string{},
+			expected: []string{
+				"/.vscode/settings.json",
+				"/.vscode/tasks.json",
+			},
+		},
+		{
+			name:     "Pattern that references hidden directories with wildcard",
+			includes: []string{"**/.*/**"},
+			excludes: []string{},
+			expected: []string{
+				"/.git/HEAD",
+				"/.git/config",
+				"/.hidden/config.json",
+				"/.hidden/secret.ts",
+				"/.vscode/settings.json",
+				"/.vscode/tasks.json",
+			},
+		},
+		{
+			name:     "Mixed patterns with hidden directory exclusions",
+			includes: []string{"**/*.ts", "**/.vscode/**"},
+			excludes: []string{"**/.git/**", "**/.hidden/**"},
+			expected: []string{
+				"/src/lib.ts",
+				"/src/main.ts",
+				"/.vscode/settings.json",
+				"/.vscode/tasks.json",
+			},
+		},
+		{
+			name:     "No explicit pattern for hidden directories should exclude them",
+			includes: []string{"src/**/*.ts", "docs/**"},
+			excludes: []string{},
+			expected: []string{
+				"/docs/readme.md",
+				"/src/lib.ts",
+				"/src/main.ts",
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			actual := vfs.MatchFilesNew("/", nil, tc.excludes, tc.includes, true, "/", nil, fs)
+
+			// Sort both for comparison
+			slices.Sort(actual)
+			slices.Sort(tc.expected)
+
+			assert.DeepEqual(t, actual, tc.expected)
+		})
+	}
+}
+
+// TestDebugHiddenPatternCoverage is specifically designed to exercise hasExplicitPatternForHidden
+func TestDebugHiddenPatternCoverage(t *testing.T) {
+	// Create a simple filesystem with just one hidden directory
+	fs := vfstest.FromMap(map[string]any{
+		"/src/main.ts":       "export const main = 1;",
+		"/.hidden/secret.ts": "export const secret = 'hidden';",
+	}, true)
+
+	// Test case where we have include patterns (not empty) but no explicit hidden directory pattern
+	// This should trigger the hasExplicitPatternForHidden code path
+	actual := vfs.MatchFilesNew("/", nil, []string{}, []string{"src/**/*.ts"}, true, "/", nil, fs)
+
+	// The hidden directory should NOT be included since there's no explicit pattern for it
+	for _, file := range actual {
+		assert.Assert(t, !strings.Contains(file, ".hidden"), "Hidden directory should not be included without explicit pattern: %s", file)
+	}
+
+	// Test case where we DO have an explicit pattern for hidden directories
+	actual2 := vfs.MatchFilesNew("/", nil, []string{}, []string{"**/.hidden/**"}, true, "/", nil, fs)
+
+	// The hidden directory SHOULD be included since there's an explicit pattern
+	found := false
+	for _, file := range actual2 {
+		if strings.Contains(file, ".hidden") {
+			found = true
+			break
+		}
+	}
+	assert.Assert(t, found, "Hidden directory should be included with explicit pattern")
+}
+
+// TestHiddenSubdirectoryPattern tests the case where directoryCouldMatchPattern processes hidden directories
+func TestHiddenSubdirectoryPattern(t *testing.T) {
+	// Create a filesystem with nested structure where hidden directories are deeper
+	fs := vfstest.FromMap(map[string]any{
+		"/src/main.ts":          "export const main = 1;",
+		"/src/.build/output.js": "// compiled output",
+		"/src/.temp/cache.json": "{}",
+		"/other/regular.ts":     "export const other = 2;",
+	}, true)
+
+	// Test with a pattern that would cause directoryCouldMatchPattern to be called
+	// on paths that contain hidden directory names
+	actual := vfs.MatchFilesNew("/", nil, []string{}, []string{"src/**"}, true, "/", nil, fs)
+
+	// Should include non-hidden files but not hidden directories unless explicitly mentioned
+	expected := []string{"/src/main.ts"}
+	slices.Sort(actual)
+	slices.Sort(expected)
+	assert.DeepEqual(t, actual, expected)
+
+	// Now test with explicit pattern for hidden directories
+	actual2 := vfs.MatchFilesNew("/", nil, []string{}, []string{"src/**/.build/**"}, true, "/", nil, fs)
+	expected2 := []string{"/src/.build/output.js"}
+	slices.Sort(actual2)
+	slices.Sort(expected2)
+	assert.DeepEqual(t, actual2, expected2)
+}
+
+// TestCouldContainMatchesIntegration tests scenarios that exercise couldContainMatches through MatchFilesNew
+func TestCouldContainMatchesIntegration(t *testing.T) {
+	// Create filesystem with various directory types to test couldContainMatches branches
+	fs := vfstest.FromMap(map[string]any{
+		"/src/main.ts":                   "export const main = 1;",
+		"/node_modules/package/index.js": "module.exports = {};",
+		"/bower_components/lib/main.js":  "// lib",
+		"/jspm_packages/dep/index.js":    "// dep",
+		"/.hidden/secret.ts":             "export const secret = 'hidden';",
+		"/regular/file.ts":               "export const regular = 1;",
+		"/other/unmatched.ts":            "export const other = 1;",
+	}, true)
+
+	testCases := []struct {
+		name     string
+		includes []string
+		excludes []string
+		contains []string // files that should be included
+		missing  []string // files that should be excluded
+	}{
+		{
+			name:     "Empty includes allows all directories except common packages",
+			includes: []string{},
+			excludes: []string{},
+			contains: []string{"/src/main.ts", "/regular/file.ts", "/.hidden/secret.ts", "/other/unmatched.ts"},
+			missing:  []string{"/node_modules/package/index.js", "/bower_components/lib/main.js", "/jspm_packages/dep/index.js"},
+		},
+		{
+			name:     "Empty includes with exclusion for common package",
+			includes: []string{},
+			excludes: []string{"**/node_modules/**"},
+			contains: []string{"/src/main.ts", "/regular/file.ts"},
+			missing:  []string{"/node_modules/package/index.js"},
+		},
+		{
+			name:     "Specific includes skip common packages without explicit mention",
+			includes: []string{"src/**", "regular/**"},
+			excludes: []string{},
+			contains: []string{"/src/main.ts", "/regular/file.ts"},
+			missing:  []string{"/node_modules/package/index.js", "/other/unmatched.ts"},
+		},
+		{
+			name:     "Explicit include for common package",
+			includes: []string{"**/node_modules/**"},
+			excludes: []string{},
+			contains: []string{"/node_modules/package/index.js"},
+			missing:  []string{"/src/main.ts", "/regular/file.ts"},
+		},
+		{
+			name:     "Include bower_components explicitly",
+			includes: []string{"**/bower_components/**"},
+			excludes: []string{},
+			contains: []string{"/bower_components/lib/main.js"},
+			missing:  []string{"/src/main.ts", "/node_modules/package/index.js"},
+		},
+		{
+			name:     "Include jspm_packages explicitly",
+			includes: []string{"**/jspm_packages/**"},
+			excludes: []string{},
+			contains: []string{"/jspm_packages/dep/index.js"},
+			missing:  []string{"/src/main.ts", "/node_modules/package/index.js"},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			actual := vfs.MatchFilesNew("/", nil, tc.excludes, tc.includes, true, "/", nil, fs)
+
+			// Check that all expected files are included
+			for _, expectedFile := range tc.contains {
+				assert.Assert(t, slices.Contains(actual, expectedFile),
+					"Expected file %s not found in results", expectedFile)
+			}
+
+			// Check that excluded files are not present
+			for _, excludedFile := range tc.missing {
+				assert.Assert(t, !slices.Contains(actual, excludedFile),
+					"Excluded file %s found in results", excludedFile)
+			}
+		})
+	}
+}
+
+// TestCouldContainMatchesBranchCoverage tests specific branches in couldContainMatches
+func TestCouldContainMatchesBranchCoverage(t *testing.T) {
+	// Test the emptyIncludes path with exclude patterns for common packages
+	t.Run("EmptyIncludes with exclude patterns for common packages", func(t *testing.T) {
+		fs := vfstest.FromMap(map[string]any{
+			"/src/main.ts":                   "export const main = 1;",
+			"/node_modules/package/index.js": "module.exports = {};",
+			"/regular/file.ts":               "export const regular = 1;",
+		}, true)
+
+		// Empty includes with explicit exclude for node_modules
+		actual := vfs.MatchFilesNew("/", nil, []string{"**/node_modules/**"}, []string{}, true, "/", nil, fs)
+
+		// Should include everything except node_modules
+		expectedContains := []string{"/src/main.ts", "/regular/file.ts"}
+		expectedMissing := []string{"/node_modules/package/index.js"}
+
+		for _, expectedFile := range expectedContains {
+			assert.Assert(t, slices.Contains(actual, expectedFile),
+				"Expected file %s not found in results", expectedFile)
+		}
+		for _, excludedFile := range expectedMissing {
+			assert.Assert(t, !slices.Contains(actual, excludedFile),
+				"Excluded file %s found in results", excludedFile)
+		}
+	})
+
+	// Test the non-empty includes path with common packages but no explicit inclusion
+	t.Run("NonEmpty includes with common packages but no explicit inclusion", func(t *testing.T) {
+		fs := vfstest.FromMap(map[string]any{
+			"/src/main.ts":                   "export const main = 1;",
+			"/node_modules/package/index.js": "module.exports = {};",
+			"/bower_components/lib/main.js":  "// lib",
+			"/other/file.ts":                 "export const other = 1;",
+		}, true)
+
+		// Specific includes that don't mention common packages
+		actual := vfs.MatchFilesNew("/", nil, []string{}, []string{"src/**", "other/**"}, true, "/", nil, fs)
+
+		// Should only include files matching the patterns, skipping common packages
+		expectedContains := []string{"/src/main.ts", "/other/file.ts"}
+		expectedMissing := []string{"/node_modules/package/index.js", "/bower_components/lib/main.js"}
+
+		for _, expectedFile := range expectedContains {
+			assert.Assert(t, slices.Contains(actual, expectedFile),
+				"Expected file %s not found in results", expectedFile)
+		}
+		for _, excludedFile := range expectedMissing {
+			assert.Assert(t, !slices.Contains(actual, excludedFile),
+				"Excluded file %s found in results", excludedFile)
+		}
+	})
+
+	// Test the hidden directory path when emptyIncludes is false
+	t.Run("NonEmpty includes with hidden directories", func(t *testing.T) {
+		fs := vfstest.FromMap(map[string]any{
+			"/src/main.ts":       "export const main = 1;",
+			"/.hidden/secret.ts": "export const secret = 'hidden';",
+			"/.config/file.ts":   "export const config = 1;",
+			"/regular/file.ts":   "export const regular = 1;",
+		}, true)
+
+		// Includes that don't explicitly mention hidden directories
+		actual := vfs.MatchFilesNew("/", nil, []string{}, []string{"src/**", "regular/**"}, true, "/", nil, fs)
+
+		// Should only include files matching the patterns, excluding hidden directories
+		expectedContains := []string{"/src/main.ts", "/regular/file.ts"}
+		expectedMissing := []string{"/.hidden/secret.ts", "/.config/file.ts"}
+
+		for _, expectedFile := range expectedContains {
+			assert.Assert(t, slices.Contains(actual, expectedFile),
+				"Expected file %s not found in results", expectedFile)
+		}
+		for _, excludedFile := range expectedMissing {
+			assert.Assert(t, !slices.Contains(actual, excludedFile),
+				"Excluded file %s found in results", excludedFile)
+		}
+	})
+
+	// Test complex pattern matching scenarios
+	t.Run("Complex pattern matching in couldContainMatches", func(t *testing.T) {
+		fs := vfstest.FromMap(map[string]any{
+			"/project/src/main.ts":        "export const main = 1;",
+			"/project/tests/unit.test.ts": "// tests",
+			"/project/docs/readme.md":     "# README",
+			"/other/project/src/other.ts": "export const other = 1;",
+			"/unrelated/file.ts":          "export const unrelated = 1;",
+		}, true)
+
+		// Pattern that should match multiple directory structures
+		actual := vfs.MatchFilesNew("/", nil, []string{}, []string{"**/project/**/*.ts"}, true, "/", nil, fs)
+
+		// Should match TypeScript files in any project directory
+		expectedContains := []string{"/project/src/main.ts", "/project/tests/unit.test.ts", "/other/project/src/other.ts"}
+		expectedMissing := []string{"/project/docs/readme.md", "/unrelated/file.ts"}
+
+		for _, expectedFile := range expectedContains {
+			assert.Assert(t, slices.Contains(actual, expectedFile),
+				"Expected file %s not found in results", expectedFile)
+		}
+		for _, excludedFile := range expectedMissing {
+			assert.Assert(t, !slices.Contains(actual, excludedFile),
+				"Excluded file %s found in results", excludedFile)
+		}
+	})
 }

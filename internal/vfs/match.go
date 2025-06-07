@@ -328,23 +328,9 @@ func (v *nonRegexVisitor) isExcluded(path string) bool {
 
 // couldContainMatches checks if a directory could potentially contain files that match our include patterns
 func (v *nonRegexVisitor) couldContainMatches(dirPath string) bool {
-	// If includes is empty, we need to include hidden directories
+	// If includes is empty, we include all non-common-package directories
+	// (common packages are filtered out earlier in visitDirectory)
 	if v.emptyIncludes {
-		// Exclude common package folders unless explicitly included
-		dirName := tspath.GetBaseFileName(dirPath)
-		isCommonPackage := dirName == "node_modules" || dirName == "bower_components" || dirName == "jspm_packages"
-
-		// For empty includes, exclude common package folders but allow hidden directories
-		if isCommonPackage {
-			// Check if it's explicitly excluded
-			for _, pattern := range v.excludePatterns {
-				if strings.Contains(pattern, dirName) {
-					return false
-				}
-			}
-			// If not explicitly excluded, allow it
-			return true
-		}
 		return true
 	}
 
@@ -353,20 +339,17 @@ func (v *nonRegexVisitor) couldContainMatches(dirPath string) bool {
 		return true
 	}
 
-	// Handle common package folders and hidden directories
+	// Handle common package folders - they need explicit inclusion
 	dirName := tspath.GetBaseFileName(dirPath)
 	isCommonPackage := dirName == "node_modules" || dirName == "bower_components" || dirName == "jspm_packages"
-	isHidden := strings.HasPrefix(dirName, ".")
 
 	if isCommonPackage {
 		// For common package directories, we need explicit include patterns that mention them
 		return v.hasExplicitPatternFor(dirName)
 	}
 
-	if isHidden {
-		// For hidden directories, we need explicit include patterns that mention them
-		return v.hasExplicitPatternForHidden(dirName)
-	}
+	// Hidden directories are handled entirely in visitDirectory, so this function
+	// only deals with regular directories at this point
 
 	// For each include pattern, check if the directory could match
 	for _, pattern := range v.includePatterns {
@@ -385,16 +368,14 @@ func (v *nonRegexVisitor) directoryCouldMatchPattern(pattern, dirPath string) bo
 	// Common package folders should be skipped unless explicitly included
 	dirName := tspath.GetBaseFileName(dirPath)
 
-	// Skip common package folders (node_modules, etc) and hidden directories unless explicitly referenced
-	if strings.HasPrefix(dirName, ".") {
-		// Only include hidden directories if the pattern explicitly references them
-		return v.hasExplicitPatternForHidden(dirName)
-	}
-
+	// Handle common package directories - they need explicit patterns
 	if dirName == "node_modules" || dirName == "bower_components" || dirName == "jspm_packages" {
 		// Only include common package folders if the pattern explicitly references them
 		return v.hasExplicitPatternFor(dirName)
 	}
+
+	// Hidden directories are handled entirely in visitDirectory, so this function
+	// only deals with regular directories and common packages
 
 	// If pattern has ** wildcard, it could match anything underneath
 	if strings.Contains(pattern, "**") {
@@ -643,27 +624,6 @@ func (v *nonRegexVisitor) matchWithWildcards(pattern, segment string) bool {
 	}
 
 	return dp[patternLen][segmentLen]
-}
-
-// hasExplicitPatternForHidden checks if there's an explicit include pattern for hidden directories/files
-func (v *nonRegexVisitor) hasExplicitPatternForHidden(dirName string) bool {
-	// For empty includes, the original implementation DOES include dot-prefixed directories
-	if v.emptyIncludes {
-		return true
-	}
-
-	// Check for explicit mention of hidden directories/files in include patterns
-	for _, pattern := range v.includePatterns {
-		// Look for patterns that explicitly reference hidden items:
-		// - Either directly mentioning this hidden directory name
-		// - Or patterns like "/.something" or "**/.hidden" etc.
-		if strings.Contains(pattern, "/"+dirName) ||
-			strings.Contains(pattern, "/.*") ||
-			strings.Contains(pattern, "/.*/") {
-			return true
-		}
-	}
-	return false
 }
 
 // hasExplicitPatternFor checks if there's an explicit include pattern for a specific directory
