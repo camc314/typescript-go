@@ -185,25 +185,6 @@ func processIncludes(includes []string) []string {
 	return result
 }
 
-// ExportProcessedIncludes exposes the processIncludes function for testing
-func ExportProcessedIncludes(includes []string) []string {
-	return processIncludes(includes)
-}
-
-// getSearchBasePaths determines the base paths from which to start the search
-func getSearchBasePaths(path string, includes []string, useCaseSensitiveFileNames bool) []string {
-	// If no includes, search from the path itself
-	if len(includes) == 0 {
-		return []string{path}
-	}
-
-	// Otherwise, use the same base paths as the original implementation
-	return getBasePaths(path, includes, useCaseSensitiveFileNames)
-}
-
-// Below is a skeleton of what the implementation would look like
-// This is not complete but shows the general approach
-
 // nonRegexVisitor handles traversing the file system and matching files based on patterns
 // It maintains state for tracking visited directories and collecting results
 // This is a string-based implementation that replaces the regex-based visitor in utilities.go
