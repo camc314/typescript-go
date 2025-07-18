@@ -1007,7 +1007,7 @@ type refSearch struct {
 // )
 
 type inheritKey struct {
-	symbol, parent ast.SymbolId
+	symbol, parent *ast.Symbol
 }
 
 type refState struct {
