@@ -1024,8 +1024,8 @@ type refState struct {
 	seenContainingTypeReferences *collections.Set[*ast.Node] // node seen tracker
 	// seenReExportRHS           *collections.Set[*ast.Node] // node seen tracker
 	// importTracker             ImportTracker
-	symbolIdToReferences    map[ast.SymbolId]*SymbolAndEntries
-	sourceFileToSeenSymbols map[ast.NodeId]*collections.Set[ast.SymbolId]
+	symbolToReferences      map[*ast.Symbol]*SymbolAndEntries
+	sourceFileToSeenSymbols map[ast.NodeId]*collections.Set[*ast.Symbol]
 }
 
 func newState(sourceFiles []*ast.SourceFile, sourceFilesSet *collections.Set[string], node *ast.Node, checker *checker.Checker, searchMeaning ast.SemanticMeaning, options refOptions) *refState {
@@ -1040,8 +1040,8 @@ func newState(sourceFiles []*ast.SourceFile, sourceFilesSet *collections.Set[str
 		inheritsFromCache:            map[inheritKey]bool{},
 		seenContainingTypeReferences: &collections.Set[*ast.Node]{},
 		// seenReExportRHS:           &collections.Set[*ast.Node]{},
-		symbolIdToReferences:    map[ast.SymbolId]*SymbolAndEntries{},
-		sourceFileToSeenSymbols: map[ast.NodeId]*collections.Set[ast.SymbolId]{},
+		symbolToReferences:      map[*ast.Symbol]*SymbolAndEntries{},
+		sourceFileToSeenSymbols: map[ast.NodeId]*collections.Set[*ast.Symbol]{},
 	}
 }
 
@@ -1085,12 +1085,11 @@ func (state *refState) createSearch(location *ast.Node, symbol *ast.Symbol, comi
 
 func (state *refState) referenceAdder(searchSymbol *ast.Symbol) func(*ast.Node, entryKind) {
 	// !!! after find all references is fully implemented, rename this to something like 'getReferenceAdder'
-	symbolId := ast.GetSymbolId(searchSymbol)
-	symbolAndEntry := state.symbolIdToReferences[symbolId]
+	symbolAndEntry := state.symbolToReferences[searchSymbol]
 	if symbolAndEntry == nil {
-		state.symbolIdToReferences[symbolId] = NewSymbolAndEntries(definitionKindSymbol, nil, searchSymbol, []*referenceEntry{})
-		state.result = append(state.result, state.symbolIdToReferences[symbolId])
-		symbolAndEntry = state.symbolIdToReferences[symbolId]
+		state.symbolToReferences[searchSymbol] = NewSymbolAndEntries(definitionKindSymbol, nil, searchSymbol, []*referenceEntry{})
+		state.result = append(state.result, state.symbolToReferences[searchSymbol])
+		symbolAndEntry = state.symbolToReferences[searchSymbol]
 	}
 	return func(node *ast.Node, kind entryKind) {
 		symbolAndEntry.references = append(symbolAndEntry.references, newNodeEntryWithKind(node, kind))
@@ -1210,18 +1209,17 @@ func (state *refState) markSearchedSymbols(sourceFile *ast.SourceFile, symbols [
 	sourceId := ast.GetNodeId(sourceFile.AsNode())
 	seenSymbols := state.sourceFileToSeenSymbols[sourceId]
 	if seenSymbols == nil {
-		seenSymbols = &collections.Set[ast.SymbolId]{}
+		seenSymbols = &collections.Set[*ast.Symbol]{}
 		state.sourceFileToSeenSymbols[sourceId] = seenSymbols
 	}
 
 	anyNewSymbols := false
 	for _, sym := range symbols {
-		symbolId := ast.GetSymbolId(sym)
-		if seenSymbols.Has(symbolId) {
+		if seenSymbols.Has(sym) {
 			continue
 		}
 		anyNewSymbols = true
-		seenSymbols.Add(symbolId)
+		seenSymbols.Add(sym)
 	}
 	return anyNewSymbols
 }

@@ -104,8 +104,8 @@ type EnumLiteralKey struct {
 // EnumRelationKey
 
 type EnumRelationKey struct {
-	sourceId ast.SymbolId
-	targetId ast.SymbolId
+	source *ast.Symbol
+	target *ast.Symbol
 }
 
 // TypeCacheKind
@@ -13392,6 +13392,7 @@ func (c *Checker) newSymbol(flags ast.SymbolFlags, name string) *ast.Symbol {
 	result := c.symbolPool.New()
 	result.Flags = flags | ast.SymbolFlagsTransient
 	result.Name = name
+	// TODO(jakebailey): set ID
 	return result
 }
 

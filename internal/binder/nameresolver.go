@@ -440,6 +440,7 @@ func (r *NameResolver) argumentsSymbol() *ast.Symbol {
 	if r.ArgumentsSymbol == nil {
 		// Default implementation synthesizes a transient symbol for `arguments`
 		r.ArgumentsSymbol = &ast.Symbol{Name: "arguments", Flags: ast.SymbolFlagsProperty | ast.SymbolFlagsTransient}
+		// TODO(jakebailey): set ID
 	}
 	return r.ArgumentsSymbol
 }

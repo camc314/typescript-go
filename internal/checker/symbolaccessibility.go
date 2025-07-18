@@ -382,7 +382,7 @@ func (ch *Checker) getAccessibleSymbolChain(
 	meaning ast.SymbolFlags,
 	useOnlyExternalAliasing bool,
 ) []*ast.Symbol {
-	return ch.getAccessibleSymbolChainEx(accessibleSymbolChainContext{symbol, enclosingDeclaration, meaning, useOnlyExternalAliasing, make(map[ast.SymbolId]map[unsafe.Pointer]struct{})})
+	return ch.getAccessibleSymbolChainEx(accessibleSymbolChainContext{symbol, enclosingDeclaration, meaning, useOnlyExternalAliasing, make(map[*ast.Symbol]map[unsafe.Pointer]struct{})})
 }
 
 func (ch *Checker) GetAccessibleSymbolChain(
@@ -399,7 +399,7 @@ type accessibleSymbolChainContext struct {
 	enclosingDeclaration    *ast.Node
 	meaning                 ast.SymbolFlags
 	useOnlyExternalAliasing bool
-	visitedSymbolTablesMap  map[ast.SymbolId]map[unsafe.Pointer]struct{}
+	visitedSymbolTablesMap  map[*ast.Symbol]map[unsafe.Pointer]struct{}
 }
 
 func (ch *Checker) getAccessibleSymbolChainEx(ctx accessibleSymbolChainContext) []*ast.Symbol {
@@ -443,11 +443,10 @@ func (ch *Checker) getAccessibleSymbolChainEx(ctx accessibleSymbolChainContext) 
 * @param {ignoreQualification} boolean Set when a symbol is being looked for through the exports of another symbol (meaning we have a route to qualify it already)
  */
 func (ch *Checker) getAccessibleSymbolChainFromSymbolTable(ctx accessibleSymbolChainContext, t ast.SymbolTable, ignoreQualification bool, isLocalNameLookup bool) []*ast.Symbol {
-	symId := ast.GetSymbolId(ctx.symbol)
-	visitedSymbolTables, ok := ctx.visitedSymbolTablesMap[symId]
+	visitedSymbolTables, ok := ctx.visitedSymbolTablesMap[ctx.symbol]
 	if !ok {
 		visitedSymbolTables = make(map[unsafe.Pointer]struct{})
-		ctx.visitedSymbolTablesMap[symId] = visitedSymbolTables
+		ctx.visitedSymbolTablesMap[ctx.symbol] = visitedSymbolTables
 	}
 
 	id := reflect.ValueOf(t).UnsafePointer() // TODO: Is this seriously the only way to check reference equality of maps?

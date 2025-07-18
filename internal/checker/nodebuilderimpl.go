@@ -69,9 +69,9 @@ type NodeBuilderContext struct {
 	trackedSymbols                  []*TrackedSymbolArgs
 	mapper                          *TypeMapper
 	reverseMappedStack              []*ast.Symbol
-	enclosingSymbolTypes            map[ast.SymbolId]*Type
+	enclosingSymbolTypes            map[*ast.Symbol]*Type
 	suppressReportInferenceFallback bool
-	remappedSymbolReferences        map[ast.SymbolId]*ast.Symbol
+	remappedSymbolReferences        map[*ast.Symbol]*ast.Symbol
 
 	// per signature scope state
 	hasCreatedTypeParameterSymbolList     bool
@@ -79,7 +79,7 @@ type NodeBuilderContext struct {
 	typeParameterNames                    map[TypeId]*ast.Identifier
 	typeParameterNamesByText              map[string]struct{}
 	typeParameterNamesByTextNextNameCount map[string]int
-	typeParameterSymbolList               map[ast.SymbolId]struct{}
+	typeParameterSymbolList               map[*ast.Symbol]struct{}
 }
 
 type nodeBuilderImpl struct {
@@ -839,7 +839,7 @@ func (b *nodeBuilderImpl) getNameOfSymbolFromNameType(symbol *ast.Symbol) string
 * It will also use a representation of a number as written instead of a decimal form, e.g. `0o11` instead of `9`.
  */
 func (b *nodeBuilderImpl) getNameOfSymbolAsWritten(symbol *ast.Symbol) string {
-	result, ok := b.ctx.remappedSymbolReferences[ast.GetSymbolId(symbol)]
+	result, ok := b.ctx.remappedSymbolReferences[symbol]
 	if ok {
 		symbol = result
 	}
@@ -904,16 +904,15 @@ func (b *nodeBuilderImpl) getTypeParametersOfClassOrInterface(symbol *ast.Symbol
 func (b *nodeBuilderImpl) lookupTypeParameterNodes(chain []*ast.Symbol, index int) *ast.TypeParameterList {
 	// Debug.assert(chain && 0 <= index && index < chain.length); // !!!
 	symbol := chain[index]
-	symbolId := ast.GetSymbolId(symbol)
 	if !b.ctx.hasCreatedTypeParameterSymbolList {
 		b.ctx.hasCreatedTypeParameterSymbolList = true
-		b.ctx.typeParameterSymbolList = make(map[ast.SymbolId]struct{})
+		b.ctx.typeParameterSymbolList = make(map[*ast.Symbol]struct{})
 	}
-	_, ok := b.ctx.typeParameterSymbolList[symbolId]
+	_, ok := b.ctx.typeParameterSymbolList[symbol]
 	if ok {
 		return nil
 	}
-	b.ctx.typeParameterSymbolList[symbolId] = struct{}{}
+	b.ctx.typeParameterSymbolList[symbol] = struct{}{}
 
 	if b.ctx.flags&nodebuilder.FlagsWriteTypeParametersInQualifiedName != 0 && index < (len(chain)-1) {
 		parentSymbol := symbol
@@ -1987,7 +1986,7 @@ func (b *nodeBuilderImpl) serializeTypeForDeclaration(declaration *ast.Declarati
 		symbol = b.ch.getSymbolOfDeclaration(declaration)
 	}
 	if t == nil {
-		t = b.ctx.enclosingSymbolTypes[ast.GetSymbolId(symbol)]
+		t = b.ctx.enclosingSymbolTypes[symbol]
 		if t == nil {
 			if symbol.Flags&ast.SymbolFlagsAccessor != 0 && declaration.Kind == ast.KindSetAccessor {
 				t = b.ch.instantiateType(b.ch.getWriteTypeOfSymbol(symbol), b.ctx.mapper)

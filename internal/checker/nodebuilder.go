@@ -29,8 +29,8 @@ func (b *NodeBuilder) enterContext(enclosingDeclaration *ast.Node, flags nodebui
 		symbolDepth:              make(map[CompositeSymbolIdentity]int),
 		trackedSymbols:           make([]*TrackedSymbolArgs, 0),
 		reverseMappedStack:       make([]*ast.Symbol, 0),
-		enclosingSymbolTypes:     make(map[ast.SymbolId]*Type),
-		remappedSymbolReferences: make(map[ast.SymbolId]*ast.Symbol),
+		enclosingSymbolTypes:     make(map[*ast.Symbol]*Type),
+		remappedSymbolReferences: make(map[*ast.Symbol]*ast.Symbol),
 	}
 	if tracker == nil {
 		tracker = NewSymbolTrackerImpl(b.impl.ctx, nil, b.host)
@@ -83,7 +83,7 @@ func (b *NodeBuilder) SerializeReturnTypeForSignature(signatureDeclaration *ast.
 	b.enterContext(enclosingDeclaration, flags, internalFlags, tracker)
 	signature := b.impl.ch.getSignatureFromDeclaration(signatureDeclaration)
 	symbol := b.impl.ch.getSymbolOfDeclaration(signatureDeclaration)
-	returnType, ok := b.impl.ctx.enclosingSymbolTypes[ast.GetSymbolId(symbol)]
+	returnType, ok := b.impl.ctx.enclosingSymbolTypes[symbol]
 	if !ok || returnType == nil {
 		returnType = b.impl.ch.instantiateType(b.impl.ch.getReturnTypeOfSignature(signature), b.impl.ctx.mapper)
 	}

@@ -133,6 +133,7 @@ func (b *Binder) newSymbol(flags ast.SymbolFlags, name string) *ast.Symbol {
 	result := b.symbolPool.New()
 	result.Flags = flags
 	result.Name = name
+	// TODO(jakebailey): set ID
 	return result
 }
 

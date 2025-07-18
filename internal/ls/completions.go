@@ -81,8 +81,8 @@ type completionDataData struct {
 	location                     *ast.Node
 	keywordFilters               KeywordCompletionFilters
 	literals                     []literalValue
-	symbolToOriginInfoMap        map[ast.SymbolId]*symbolOriginInfo
-	symbolToSortTextMap          map[ast.SymbolId]sortText
+	symbolToOriginInfoMap        map[*ast.Symbol]*symbolOriginInfo
+	symbolToSortTextMap          map[*ast.Symbol]sortText
 	recommendedCompletion        *ast.Symbol
 	previousToken                *ast.Node
 	contextToken                 *ast.Node
@@ -549,10 +549,10 @@ func getCompletionData(program *compiler.Program, typeChecker *checker.Checker, 
 	hasUnresolvedAutoImports := false
 	// This also gets mutated in nested-functions after the return
 	var symbols []*ast.Symbol
-	symbolToOriginInfoMap := map[ast.SymbolId]*symbolOriginInfo{}
-	symbolToSortTextMap := map[ast.SymbolId]sortText{}
+	symbolToOriginInfoMap := map[*ast.Symbol]*symbolOriginInfo{}
+	symbolToSortTextMap := map[*ast.Symbol]sortText{}
 	// var importSpecifierResolver any // !!! import
-	var seenPropertySymbols collections.Set[ast.SymbolId]
+	var seenPropertySymbols collections.Set[*ast.Symbol]
 	isTypeOnlyLocation := insideJSDocTagTypeExpression || insideJsDocImportTag ||
 		importStatementCompletion != nil && ast.IsTypeOnlyImportOrExportDeclaration(location.Parent) ||
 		!isContextTokenValueLocation(contextToken) &&
@@ -562,18 +562,16 @@ func getCompletionData(program *compiler.Program, typeChecker *checker.Checker, 
 	// var getModuleSpecifierResolutionHost any // !!! auto import
 
 	addSymbolOriginInfo := func(symbol *ast.Symbol, insertQuestionDot bool, insertAwait bool) {
-		symbolId := ast.GetSymbolId(symbol)
-		if insertAwait && seenPropertySymbols.AddIfAbsent(symbolId) {
-			symbolToOriginInfoMap[symbolId] = &symbolOriginInfo{kind: getNullableSymbolOriginInfoKind(symbolOriginInfoKindPromise, insertQuestionDot)}
+		if insertAwait && seenPropertySymbols.AddIfAbsent(symbol) {
+			symbolToOriginInfoMap[symbol] = &symbolOriginInfo{kind: getNullableSymbolOriginInfoKind(symbolOriginInfoKindPromise, insertQuestionDot)}
 		} else if insertQuestionDot {
-			symbolToOriginInfoMap[symbolId] = &symbolOriginInfo{kind: symbolOriginInfoKindNullable}
+			symbolToOriginInfoMap[symbol] = &symbolOriginInfo{kind: symbolOriginInfoKindNullable}
 		}
 	}
 
 	addSymbolSortInfo := func(symbol *ast.Symbol) {
-		symbolId := ast.GetSymbolId(symbol)
 		if isStaticProperty(symbol) {
-			symbolToSortTextMap[symbolId] = SortTextLocalDeclarationPriority
+			symbolToSortTextMap[symbol] = SortTextLocalDeclarationPriority
 		}
 	}
 
@@ -600,17 +598,13 @@ func getCompletionData(program *compiler.Program, typeChecker *checker.Checker, 
 			if nameSymbol != nil {
 				firstAccessibleSymbol = getFirstSymbolInChain(nameSymbol, contextToken, typeChecker)
 			}
-			var firstAccessibleSymbolId ast.SymbolId
-			if firstAccessibleSymbol != nil {
-				firstAccessibleSymbolId = ast.GetSymbolId(firstAccessibleSymbol)
-			}
-			if firstAccessibleSymbolId != 0 && seenPropertySymbols.AddIfAbsent(firstAccessibleSymbolId) {
+			if firstAccessibleSymbol != nil && seenPropertySymbols.AddIfAbsent(firstAccessibleSymbol) {
 				symbols = append(symbols, firstAccessibleSymbol)
 				moduleSymbol := firstAccessibleSymbol.Parent
 				if moduleSymbol == nil ||
 					!checker.IsExternalModuleSymbol(moduleSymbol) ||
 					typeChecker.TryGetMemberInModuleExportsAndProperties(firstAccessibleSymbol.Name, moduleSymbol) != firstAccessibleSymbol {
-					symbolToOriginInfoMap[ast.GetSymbolId(symbol)] = &symbolOriginInfo{kind: getNullableSymbolOriginInfoKind(symbolOriginInfoKindSymbolMemberNoExport, insertQuestionDot)}
+					symbolToOriginInfoMap[symbol] = &symbolOriginInfo{kind: getNullableSymbolOriginInfoKind(symbolOriginInfoKindSymbolMemberNoExport, insertQuestionDot)}
 				} else {
 					// !!! imports
 					// var fileName string
@@ -645,7 +639,7 @@ func getCompletionData(program *compiler.Program, typeChecker *checker.Checker, 
 					// 	symbolToOriginInfoMap[index] = origin;
 					// }
 				}
-			} else if firstAccessibleSymbolId == 0 || !seenPropertySymbols.Has(firstAccessibleSymbolId) {
+			} else if firstAccessibleSymbol == nil || !seenPropertySymbols.Has(firstAccessibleSymbol) {
 				symbols = append(symbols, symbol)
 				addSymbolOriginInfo(symbol, insertQuestionDot, insertAwait)
 				addSymbolSortInfo(symbol)
@@ -743,7 +737,7 @@ func getCompletionData(program *compiler.Program, typeChecker *checker.Checker, 
 							return typeChecker.IsValidPropertyAccess(valueAccessNode, s.Name)
 						}
 						isValidTypeAccess := func(s *ast.Symbol) bool {
-							return symbolCanBeReferencedAtTypeLocation(s, typeChecker, collections.Set[ast.SymbolId]{})
+							return symbolCanBeReferencedAtTypeLocation(s, typeChecker, collections.Set[*ast.Symbol]{})
 						}
 						var isValidAccess bool
 						if isNamespaceName {
@@ -971,14 +965,13 @@ func getCompletionData(program *compiler.Program, typeChecker *checker.Checker, 
 			transformObjectLiteralMembers := ptrIsTrue(preferences.IncludeCompletionsWithObjectLiteralMethodSnippets) &&
 				objectLikeContainer.Kind == ast.KindObjectLiteralExpression
 			for _, member := range filteredMembers {
-				symbolId := ast.GetSymbolId(member)
 				if spreadMemberNames.Has(member.Name) {
-					symbolToSortTextMap[symbolId] = SortTextMemberDeclaredBySpreadAssignment
+					symbolToSortTextMap[member] = SortTextMemberDeclaredBySpreadAssignment
 				}
 				if member.Flags&ast.SymbolFlagsOptional != 0 {
-					_, ok := symbolToSortTextMap[symbolId]
+					_, ok := symbolToSortTextMap[member]
 					if !ok {
-						symbolToSortTextMap[symbolId] = SortTextOptionalMember
+						symbolToSortTextMap[member] = SortTextOptionalMember
 					}
 				}
 				if transformObjectLiteralMembers {
@@ -1141,8 +1134,7 @@ func getCompletionData(program *compiler.Program, typeChecker *checker.Checker, 
 		for name, symbol := range localsContainer.Locals() {
 			symbols = append(symbols, symbol)
 			if _, ok := localExports[name]; ok {
-				symbolId := ast.GetSymbolId(symbol)
-				symbolToSortTextMap[symbolId] = SortTextOptionalMember
+				symbolToSortTextMap[symbol] = SortTextOptionalMember
 			}
 		}
 
@@ -1243,12 +1235,11 @@ func getCompletionData(program *compiler.Program, typeChecker *checker.Checker, 
 				if declaration != nil && ast.IsClassElement(declaration) &&
 					declaration.Name() != nil &&
 					ast.IsComputedPropertyName(declaration.Name()) {
-					symbolId := ast.GetSymbolId(symbol)
 					origin := &symbolOriginInfo{
 						kind: symbolOriginInfoKindComputedPropertyName,
 						data: &symbolOriginInfoComputedPropertyName{symbolName: typeChecker.SymbolToString(symbol)},
 					}
-					symbolToOriginInfoMap[symbolId] = origin
+					symbolToOriginInfoMap[symbol] = origin
 				}
 			}
 		}
@@ -1278,14 +1269,13 @@ func getCompletionData(program *compiler.Program, typeChecker *checker.Checker, 
 		symbols = append(symbols, filteredSymbols...)
 		// Set sort texts.
 		for _, symbol := range filteredSymbols {
-			symbolId := ast.GetSymbolId(symbol)
 			if spreadMemberNames.Has(symbol.Name) {
-				symbolToSortTextMap[symbolId] = SortTextMemberDeclaredBySpreadAssignment
+				symbolToSortTextMap[symbol] = SortTextMemberDeclaredBySpreadAssignment
 			}
 			if symbol.Flags&ast.SymbolFlagsOptional != 0 {
-				_, ok := symbolToSortTextMap[symbolId]
+				_, ok := symbolToSortTextMap[symbol]
 				if !ok {
-					symbolToSortTextMap[symbolId] = SortTextOptionalMember
+					symbolToSortTextMap[symbol] = SortTextOptionalMember
 				}
 			}
 		}
@@ -1356,12 +1346,11 @@ func getCompletionData(program *compiler.Program, typeChecker *checker.Checker, 
 		symbols = append(symbols, typeChecker.GetSymbolsInScope(scopeNode, symbolMeanings)...)
 		core.CheckEachDefined(symbols, "getSymbolsInScope() should all be defined")
 		for _, symbol := range symbols {
-			symbolId := ast.GetSymbolId(symbol)
 			if !typeChecker.IsArgumentsSymbol(symbol) &&
 				!core.Some(symbol.Declarations, func(decl *ast.Declaration) bool {
 					return ast.GetSourceFileOfNode(decl) == file
 				}) {
-				symbolToSortTextMap[symbolId] = SortTextGlobalsOrKeywords
+				symbolToSortTextMap[symbol] = SortTextGlobalsOrKeywords
 			}
 			if typeOnlyAliasNeedsPromotion && symbol.Flags&ast.SymbolFlagsValue == 0 {
 				typeOnlyAliasDeclaration := core.Find(symbol.Declarations, ast.IsTypeOnlyImportDeclaration)
@@ -1370,7 +1359,7 @@ func getCompletionData(program *compiler.Program, typeChecker *checker.Checker, 
 						kind: symbolOriginInfoKindTypeOnlyAlias,
 						data: &symbolOriginInfoTypeOnlyAlias{declaration: typeOnlyAliasDeclaration},
 					}
-					symbolToOriginInfoMap[symbolId] = origin
+					symbolToOriginInfoMap[symbol] = origin
 				}
 			}
 		}
@@ -1383,10 +1372,9 @@ func getCompletionData(program *compiler.Program, typeChecker *checker.Checker, 
 				core.IfElse(ast.IsClassLike(scopeNode.Parent), scopeNode, nil))
 			if thisType != nil && !isProbablyGlobalType(thisType, file, typeChecker) {
 				for _, symbol := range getPropertiesForCompletion(thisType, typeChecker) {
-					symbolId := ast.GetSymbolId(symbol)
 					symbols = append(symbols, symbol)
-					symbolToOriginInfoMap[symbolId] = &symbolOriginInfo{kind: symbolOriginInfoKindThisType}
-					symbolToSortTextMap[symbolId] = SortTextSuggestedClassMembers
+					symbolToOriginInfoMap[symbol] = &symbolOriginInfo{kind: symbolOriginInfoKindThisType}
+					symbolToSortTextMap[symbol] = SortTextSuggestedClassMembers
 				}
 			}
 		}
@@ -1673,8 +1661,7 @@ func (l *LanguageService) getCompletionEntriesFromSymbols(
 	// So adding a completion for a local will prevent us from adding completions for external module exports sharing the same name.
 	uniques := make(uniqueNamesMap)
 	for _, symbol := range data.symbols {
-		symbolId := ast.GetSymbolId(symbol)
-		origin := data.symbolToOriginInfoMap[symbolId]
+		origin := data.symbolToOriginInfoMap[symbol]
 		name, needsConvertPropertyAccess := getCompletionEntryDisplayNameForSymbol(
 			symbol,
 			origin,
@@ -1693,7 +1680,7 @@ func (l *LanguageService) getCompletionEntriesFromSymbols(
 			continue
 		}
 
-		originalSortText := data.symbolToSortTextMap[ast.GetSymbolId(symbol)]
+		originalSortText := data.symbolToSortTextMap[symbol]
 		if originalSortText == "" {
 			originalSortText = SortTextLocationPriority
 		}
@@ -2298,9 +2285,9 @@ func shouldIncludeSymbol(
 	// Auto Imports are not available for scripts so this conditional is always false.
 	if file.AsSourceFile().ExternalModuleIndicator != nil &&
 		compilerOptions.AllowUmdGlobalAccess != core.TSTrue &&
-		data.symbolToSortTextMap[ast.GetSymbolId(symbol)] == SortTextGlobalsOrKeywords &&
-		(data.symbolToSortTextMap[ast.GetSymbolId(symbolOrigin)] == SortTextAutoImportSuggestions ||
-			data.symbolToSortTextMap[ast.GetSymbolId(symbolOrigin)] == SortTextLocationPriority) {
+		data.symbolToSortTextMap[symbol] == SortTextGlobalsOrKeywords &&
+		(data.symbolToSortTextMap[symbolOrigin] == SortTextAutoImportSuggestions ||
+			data.symbolToSortTextMap[symbolOrigin] == SortTextLocationPriority) {
 		return false
 	}
 
@@ -2313,7 +2300,7 @@ func shouldIncludeSymbol(
 
 	if data.isTypeOnlyLocation {
 		// It's a type, but you can reach it by namespace.type as well.
-		return symbolCanBeReferencedAtTypeLocation(symbol, typeChecker, collections.Set[ast.SymbolId]{})
+		return symbolCanBeReferencedAtTypeLocation(symbol, typeChecker, collections.Set[*ast.Symbol]{})
 	}
 
 	// expressions are value space (which includes the value namespaces)
@@ -2550,7 +2537,7 @@ func isContextTokenTypeLocation(contextToken *ast.Node) bool {
 }
 
 // True if symbol is a type or a module containing at least one type.
-func symbolCanBeReferencedAtTypeLocation(symbol *ast.Symbol, typeChecker *checker.Checker, seenModules collections.Set[ast.SymbolId]) bool {
+func symbolCanBeReferencedAtTypeLocation(symbol *ast.Symbol, typeChecker *checker.Checker, seenModules collections.Set[*ast.Symbol]) bool {
 	// Since an alias can be merged with a local declaration, we need to test both the alias and its target.
 	// This code used to just test the result of `skipAlias`, but that would ignore any locally introduced meanings.
 	return nonAliasCanBeReferencedAtTypeLocation(symbol, typeChecker, seenModules) ||
@@ -2561,9 +2548,9 @@ func symbolCanBeReferencedAtTypeLocation(symbol *ast.Symbol, typeChecker *checke
 		)
 }
 
-func nonAliasCanBeReferencedAtTypeLocation(symbol *ast.Symbol, typeChecker *checker.Checker, seenModules collections.Set[ast.SymbolId]) bool {
+func nonAliasCanBeReferencedAtTypeLocation(symbol *ast.Symbol, typeChecker *checker.Checker, seenModules collections.Set[*ast.Symbol]) bool {
 	return symbol.Flags&ast.SymbolFlagsType != 0 || typeChecker.IsUnknownSymbol(symbol) ||
-		symbol.Flags&ast.SymbolFlagsModule != 0 && seenModules.AddIfAbsent(ast.GetSymbolId(symbol)) &&
+		symbol.Flags&ast.SymbolFlagsModule != 0 && seenModules.AddIfAbsent(symbol) &&
 			core.Some(
 				typeChecker.GetExportsOfModule(symbol),
 				func(e *ast.Symbol) bool { return symbolCanBeReferencedAtTypeLocation(e, typeChecker, seenModules) })
@@ -4782,8 +4769,7 @@ func getSymbolCompletionFromItemData(
 	// name against 'entryName' (which is known to be good), not building a new
 	// completion entry.
 	for _, symbol := range data.symbols {
-		symbolId := ast.GetSymbolId(symbol)
-		origin := data.symbolToOriginInfoMap[symbolId]
+		origin := data.symbolToOriginInfoMap[symbol]
 		displayName, _ := getCompletionEntryDisplayNameForSymbol(symbol, origin, data.completionKind, data.isJsxIdentifierExpected)
 		if displayName == itemData.Name &&
 			(itemData.Source == string(completionSourceClassMemberSnippet) && symbol.Flags&ast.SymbolFlagsClassMember != 0 ||
