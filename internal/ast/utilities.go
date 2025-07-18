@@ -13,21 +13,10 @@ import (
 
 // Atomic ids
 
-var (
-	nextNodeId   atomic.Uint64
-	nextSymbolId atomic.Uint64
-)
+var nextSymbolId atomic.Uint64
 
 func GetNodeId(node *Node) NodeId {
-	id := node.id.Load()
-	if id == 0 {
-		// Worst case, we burn a few ids if we have to CAS.
-		id = nextNodeId.Add(1)
-		if !node.id.CompareAndSwap(0, id) {
-			id = node.id.Load()
-		}
-	}
-	return NodeId(id)
+	return node.id
 }
 
 func GetSymbolId(symbol *Symbol) SymbolId {

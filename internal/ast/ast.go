@@ -118,9 +118,12 @@ func NewNodeFactory(hooks NodeFactoryHooks) *NodeFactory {
 	return &NodeFactory{hooks: hooks}
 }
 
+var nextNodeId atomic.Uint64
+
 func newNode(kind Kind, data nodeData, hooks NodeFactoryHooks) *Node {
 	n := data.AsNode()
 	n.Loc = core.UndefinedTextRange()
+	n.id = NodeId(nextNodeId.Add(1))
 	n.Kind = kind
 	n.data = data
 	if hooks.OnCreate != nil {
@@ -227,7 +230,7 @@ type Node struct {
 	Kind   Kind
 	Flags  NodeFlags
 	Loc    core.TextRange
-	id     atomic.Uint64
+	id     NodeId
 	Parent *Node
 	data   nodeData
 }
