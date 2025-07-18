@@ -21,8 +21,8 @@ import (
 
 type CompositeSymbolIdentity struct {
 	isConstructorNode bool
-	symbolId          ast.SymbolId
-	nodeId            ast.NodeId
+	symbol            *ast.Symbol
+	node              *ast.Node
 }
 
 type TrackedSymbolArgs struct {
@@ -2711,11 +2711,11 @@ func (b *nodeBuilderImpl) visitAndTransformType(t *Type, transform func(b *nodeB
 	var id *CompositeSymbolIdentity
 	switch {
 	case t.objectFlags&ObjectFlagsReference != 0 && t.AsTypeReference().node != nil:
-		id = &CompositeSymbolIdentity{false, 0, ast.GetNodeId(t.AsTypeReference().node)}
+		id = &CompositeSymbolIdentity{false, nil, t.AsTypeReference().node}
 	case t.flags&TypeFlagsConditional != 0:
-		id = &CompositeSymbolIdentity{false, 0, ast.GetNodeId(t.AsConditionalType().root.node.AsNode())}
+		id = &CompositeSymbolIdentity{false, nil, t.AsConditionalType().root.node.AsNode()}
 	case t.symbol != nil:
-		id = &CompositeSymbolIdentity{isConstructorObject, ast.GetSymbolId(t.symbol), 0}
+		id = &CompositeSymbolIdentity{isConstructorObject, t.symbol, nil}
 	default:
 		id = nil
 	}
