@@ -55,7 +55,7 @@ type DeclarationTransformer struct {
 	enclosingDeclaration             *ast.Node
 	resultHasExternalModuleIndicator bool
 	suppressNewDiagnosticContexts    bool
-	lateStatementReplacementMap      map[ast.NodeId]*ast.Node
+	lateStatementReplacementMap      map[*ast.Node]*ast.Node
 	rawReferencedFiles               []ReferencedFilePair
 	rawTypeReferenceDirectives       []*ast.FileReference
 	rawLibReferenceDirectives        []*ast.FileReference
@@ -164,7 +164,7 @@ func (tx *DeclarationTransformer) visitSourceFile(node *ast.SourceFile) *ast.Nod
 	tx.resultHasExternalModuleIndicator = false
 	tx.suppressNewDiagnosticContexts = false
 	tx.state.lateMarkedStatements = make([]*ast.Node, 0)
-	tx.lateStatementReplacementMap = make(map[ast.NodeId]*ast.Node)
+	tx.lateStatementReplacementMap = make(map[*ast.Node]*ast.Node)
 	tx.rawReferencedFiles = make([]ReferencedFilePair, 0)
 	tx.rawTypeReferenceDirectives = make([]*ast.FileReference, 0)
 	tx.rawLibReferenceDirectives = make([]*ast.FileReference, 0)
@@ -237,8 +237,7 @@ func (tx *DeclarationTransformer) transformAndReplaceLatePaintedStatements(state
 
 		tx.needsDeclare = priorNeedsDeclare
 		original := tx.EmitContext().MostOriginal(next)
-		id := ast.GetNodeId(original)
-		tx.lateStatementReplacementMap[id] = result
+		tx.lateStatementReplacementMap[original] = result
 	}
 
 	// And lastly, we need to get the final form of all those indetermine import declarations from before and add them to the output list
@@ -250,8 +249,7 @@ func (tx *DeclarationTransformer) transformAndReplaceLatePaintedStatements(state
 			continue
 		}
 		original := tx.EmitContext().MostOriginal(statement)
-		id := ast.GetNodeId(original)
-		replacement, ok := tx.lateStatementReplacementMap[id]
+		replacement, ok := tx.lateStatementReplacementMap[original]
 		if !ok {
 			results = append(results, statement)
 			continue // not replaced
@@ -938,8 +936,7 @@ func (tx *DeclarationTransformer) visitDeclarationStatements(input *ast.Node) *a
 		result := tx.transformTopLevelDeclaration(input)
 		// Don't actually transform yet; just leave as original node - will be elided/swapped by late pass
 		original := tx.EmitContext().MostOriginal(input)
-		id := ast.GetNodeId(original)
-		tx.lateStatementReplacementMap[id] = result
+		tx.lateStatementReplacementMap[original] = result
 		return input
 	}
 }
@@ -1209,9 +1206,8 @@ func (tx *DeclarationTransformer) transformModuleDeclaration(input *ast.ModuleDe
 		tx.Visitor().Visit(inner)
 		// eagerly transform nested namespaces (the nesting doesn't need any elision or painting done)
 		original := tx.EmitContext().MostOriginal(inner)
-		id := ast.GetNodeId(original)
-		body, _ := tx.lateStatementReplacementMap[id]
-		delete(tx.lateStatementReplacementMap, id)
+		body, _ := tx.lateStatementReplacementMap[original]
+		delete(tx.lateStatementReplacementMap, original)
 		return tx.Factory().UpdateModuleDeclaration(
 			input,
 			mods,

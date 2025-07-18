@@ -195,14 +195,14 @@ type AssignmentReducedKey struct {
 // DiscriminatedContextualTypeKey
 
 type DiscriminatedContextualTypeKey struct {
-	nodeId ast.NodeId
+	node *ast.Node
 	typeId TypeId
 }
 
 // InstantiationExpressionKey
 
 type InstantiationExpressionKey struct {
-	nodeId ast.NodeId
+	node   *ast.Node
 	typeId TypeId
 }
 
@@ -10154,7 +10154,7 @@ func (c *Checker) getInstantiationExpressionType(exprType *Type, node *ast.Node)
 	if exprType == c.silentNeverType || c.isErrorType(exprType) || typeArguments == nil {
 		return exprType
 	}
-	key := InstantiationExpressionKey{nodeId: ast.GetNodeId(node), typeId: exprType.id}
+	key := InstantiationExpressionKey{node: node, typeId: exprType.id}
 	if cached := c.instantiationExpressionTypes[key]; cached != nil {
 		return cached
 	}
@@ -29276,7 +29276,7 @@ func (d *ObjectLiteralDiscriminator) matches(index int, t *Type) bool {
 }
 
 func (c *Checker) discriminateContextualTypeByObjectMembers(node *ast.Node, contextualType *Type) *Type {
-	key := DiscriminatedContextualTypeKey{nodeId: ast.GetNodeId(node), typeId: contextualType.id}
+	key := DiscriminatedContextualTypeKey{node: node, typeId: contextualType.id}
 	if discriminated := c.discriminatedContextualTypes[key]; discriminated != nil {
 		return discriminated
 	}

@@ -176,12 +176,11 @@ func (ch *Checker) getAlternativeContainingModules(symbol *ast.Symbol, enclosing
 		return nil
 	}
 	containingFile := ast.GetSourceFileOfNode(enclosingDeclaration)
-	id := ast.GetNodeId(containingFile.AsNode())
 	links := ch.symbolContainerLinks.Get(symbol)
 	if links.extendedContainersByFile == nil {
-		links.extendedContainersByFile = make(map[ast.NodeId][]*ast.Symbol)
+		links.extendedContainersByFile = make(map[*ast.SourceFile][]*ast.Symbol)
 	}
-	existing, ok := links.extendedContainersByFile[id]
+	existing, ok := links.extendedContainersByFile[containingFile]
 	if ok && existing != nil {
 		return existing
 	}
@@ -204,7 +203,7 @@ func (ch *Checker) getAlternativeContainingModules(symbol *ast.Symbol, enclosing
 			results = append(results, resolvedModule)
 		}
 		if len(results) > 0 {
-			links.extendedContainersByFile[id] = results
+			links.extendedContainersByFile[containingFile] = results
 			return results
 		}
 	}

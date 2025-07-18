@@ -1025,7 +1025,7 @@ type refState struct {
 	// seenReExportRHS           *collections.Set[*ast.Node] // node seen tracker
 	// importTracker             ImportTracker
 	symbolToReferences      map[*ast.Symbol]*SymbolAndEntries
-	sourceFileToSeenSymbols map[ast.NodeId]*collections.Set[*ast.Symbol]
+	sourceFileToSeenSymbols map[*ast.SourceFile]*collections.Set[*ast.Symbol]
 }
 
 func newState(sourceFiles []*ast.SourceFile, sourceFilesSet *collections.Set[string], node *ast.Node, checker *checker.Checker, searchMeaning ast.SemanticMeaning, options refOptions) *refState {
@@ -1041,7 +1041,7 @@ func newState(sourceFiles []*ast.SourceFile, sourceFilesSet *collections.Set[str
 		seenContainingTypeReferences: &collections.Set[*ast.Node]{},
 		// seenReExportRHS:           &collections.Set[*ast.Node]{},
 		symbolToReferences:      map[*ast.Symbol]*SymbolAndEntries{},
-		sourceFileToSeenSymbols: map[ast.NodeId]*collections.Set[*ast.Symbol]{},
+		sourceFileToSeenSymbols: map[*ast.SourceFile]*collections.Set[*ast.Symbol]{},
 	}
 }
 
@@ -1206,11 +1206,10 @@ func (state *refState) getReferencesInContainer(container *ast.Node, sourceFile 
 }
 
 func (state *refState) markSearchedSymbols(sourceFile *ast.SourceFile, symbols []*ast.Symbol) bool {
-	sourceId := ast.GetNodeId(sourceFile.AsNode())
-	seenSymbols := state.sourceFileToSeenSymbols[sourceId]
+	seenSymbols := state.sourceFileToSeenSymbols[sourceFile]
 	if seenSymbols == nil {
 		seenSymbols = &collections.Set[*ast.Symbol]{}
-		state.sourceFileToSeenSymbols[sourceId] = seenSymbols
+		state.sourceFileToSeenSymbols[sourceFile] = seenSymbols
 	}
 
 	anyNewSymbols := false
