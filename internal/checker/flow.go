@@ -1466,7 +1466,7 @@ func (c *Checker) getCandidateDiscriminantPropertyAccess(f *FlowState, expr *ast
 // array types are ultimately converted into manifest array types (using getFinalArrayType)
 // and never escape the getFlowTypeOfReference function.
 func (c *Checker) getEvolvingArrayType(elementType *Type) *Type {
-	key := CachedTypeKey{kind: CachedTypeKindEvolvingArrayType, typeId: elementType.id}
+	key := CachedTypeKey{kind: CachedTypeKindEvolvingArrayType, typ: elementType}
 	result := c.cachedTypes[key]
 	if result == nil {
 		result = c.newObjectType(ObjectFlagsEvolvingArray, nil)
@@ -2355,7 +2355,7 @@ func (c *Checker) getAssignmentReducedType(declaredType *Type, assignedType *Typ
 	if assignedType.flags&TypeFlagsNever != 0 {
 		return assignedType
 	}
-	key := AssignmentReducedKey{id1: declaredType.id, id2: assignedType.id}
+	key := AssignmentReducedKey{t1: declaredType, t2: assignedType}
 	result := c.assignmentReducedTypes[key]
 	if result == nil {
 		result = c.getAssignmentReducedTypeWorker(declaredType, assignedType)

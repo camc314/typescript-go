@@ -39,7 +39,7 @@ type SerializedTypeEntry struct {
 }
 
 type CompositeTypeCacheIdentity struct {
-	typeId        TypeId
+	typeId        *Type
 	flags         nodebuilder.Flags
 	internalFlags nodebuilder.InternalFlags
 }
@@ -64,7 +64,7 @@ type NodeBuilderContext struct {
 	enclosingDeclaration            *ast.Node
 	enclosingFile                   *ast.SourceFile
 	inferTypeParameters             []*Type
-	visitedTypes                    collections.Set[TypeId]
+	visitedTypes                    collections.Set[*Type]
 	symbolDepth                     map[CompositeSymbolIdentity]int
 	trackedSymbols                  []*TrackedSymbolArgs
 	mapper                          *TypeMapper
@@ -76,7 +76,7 @@ type NodeBuilderContext struct {
 	// per signature scope state
 	hasCreatedTypeParameterSymbolList     bool
 	hasCreatedTypeParametersNamesLookups  bool
-	typeParameterNames                    map[TypeId]*ast.Identifier
+	typeParameterNames                    map[*Type]*ast.Identifier
 	typeParameterNamesByText              map[string]struct{}
 	typeParameterNamesByTextNextNameCount map[string]int
 	typeParameterSymbolList               map[*ast.Symbol]struct{}
@@ -1290,7 +1290,7 @@ func (b *nodeBuilderImpl) typeParameterShadowsOtherTypeParameterInScope(name str
 
 func (b *nodeBuilderImpl) typeParameterToName(typeParameter *Type) *ast.Identifier {
 	if b.ctx.flags&nodebuilder.FlagsGenerateNamesForShadowedTypeParams != 0 && b.ctx.typeParameterNames != nil {
-		cached, ok := b.ctx.typeParameterNames[typeParameter.id]
+		cached, ok := b.ctx.typeParameterNames[typeParameter]
 		if ok {
 			return cached
 		}
@@ -1308,7 +1308,7 @@ func (b *nodeBuilderImpl) typeParameterToName(typeParameter *Type) *ast.Identifi
 	if b.ctx.flags&nodebuilder.FlagsGenerateNamesForShadowedTypeParams != 0 {
 		if !b.ctx.hasCreatedTypeParametersNamesLookups {
 			b.ctx.hasCreatedTypeParametersNamesLookups = true
-			b.ctx.typeParameterNames = make(map[TypeId]*ast.Identifier)
+			b.ctx.typeParameterNames = make(map[*Type]*ast.Identifier)
 			b.ctx.typeParameterNamesByText = make(map[string]struct{})
 			b.ctx.typeParameterNamesByTextNextNameCount = make(map[string]int)
 		}
@@ -1340,7 +1340,7 @@ func (b *nodeBuilderImpl) typeParameterToName(typeParameter *Type) *ast.Identifi
 		// avoiding iterations of the above loop turns out to be worth it when `i` starts to get large, so we cache the max
 		// `i` we've used thus far, to save work later
 		b.ctx.typeParameterNamesByTextNextNameCount[rawText] = i
-		b.ctx.typeParameterNames[typeParameter.id] = result.AsIdentifier()
+		b.ctx.typeParameterNames[typeParameter] = result.AsIdentifier()
 		b.ctx.typeParameterNamesByText[text] = struct{}{}
 	}
 
@@ -2409,7 +2409,7 @@ func getTypeAliasForTypeLiteral(c *Checker, t *Type) *ast.Symbol {
 	return nil
 }
 
-func (b *nodeBuilderImpl) shouldWriteTypeOfFunctionSymbol(symbol *ast.Symbol, typeId TypeId) bool {
+func (b *nodeBuilderImpl) shouldWriteTypeOfFunctionSymbol(symbol *ast.Symbol, t *Type) bool {
 	isStaticMethodSymbol := symbol.Flags&ast.SymbolFlagsMethod != 0 && core.Some(symbol.Declarations, func(declaration *ast.Node) bool {
 		return ast.IsStatic(declaration) && !b.ch.isLateBindableIndexSignature(ast.GetNameOfDeclaration(declaration))
 	})
@@ -2428,14 +2428,13 @@ func (b *nodeBuilderImpl) shouldWriteTypeOfFunctionSymbol(symbol *ast.Symbol, ty
 	}
 	if isStaticMethodSymbol || isNonLocalFunctionSymbol {
 		// typeof is allowed only for static/non local functions
-		return (b.ctx.flags&nodebuilder.FlagsUseTypeOfFunction != 0 || b.ctx.visitedTypes.Has(typeId)) && // it is type of the symbol uses itself recursively
+		return (b.ctx.flags&nodebuilder.FlagsUseTypeOfFunction != 0 || b.ctx.visitedTypes.Has(t)) && // it is type of the symbol uses itself recursively
 			(b.ctx.flags&nodebuilder.FlagsUseStructuralFallback == 0 || b.ch.IsValueSymbolAccessible(symbol, b.ctx.enclosingDeclaration)) // And the build is going to succeed without visibility error or there is no structural fallback allowed
 	}
 	return false
 }
 
 func (b *nodeBuilderImpl) createAnonymousTypeNode(t *Type) *ast.TypeNode {
-	typeId := t.id
 	symbol := t.symbol
 	if symbol != nil {
 		isInstantiationExpressionType := t.objectFlags&ObjectFlagsInstantiationExpressionType != 0
@@ -2448,7 +2447,7 @@ func (b *nodeBuilderImpl) createAnonymousTypeNode(t *Type) *ast.TypeNode {
 					return typeNode
 				}
 			}
-			if b.ctx.visitedTypes.Has(typeId) {
+			if b.ctx.visitedTypes.Has(t) {
 				return b.createElidedInformationPlaceholder()
 			}
 			return b.visitAndTransformType(t, (*nodeBuilderImpl).createTypeNodeFromObjectType)
@@ -2465,9 +2464,9 @@ func (b *nodeBuilderImpl) createAnonymousTypeNode(t *Type) *ast.TypeNode {
 		// 	// Instance and static types share the same symbol; only add 'typeof' for the static side.
 		// 	return b.symbolToTypeNode(symbol, isInstanceType, nil)
 		// } else
-		if symbol.Flags&ast.SymbolFlagsClass != 0 && b.ch.getBaseTypeVariableOfClass(symbol) == nil && !(symbol.ValueDeclaration != nil && ast.IsClassLike(symbol.ValueDeclaration) && b.ctx.flags&nodebuilder.FlagsWriteClassExpressionAsTypeLiteral != 0 && (!ast.IsClassDeclaration(symbol.ValueDeclaration) || b.ch.IsSymbolAccessible(symbol, b.ctx.enclosingDeclaration, isInstanceType, false /*shouldComputeAliasesToMakeVisible*/).Accessibility != printer.SymbolAccessibilityAccessible)) || symbol.Flags&(ast.SymbolFlagsEnum|ast.SymbolFlagsValueModule) != 0 || b.shouldWriteTypeOfFunctionSymbol(symbol, typeId) {
+		if symbol.Flags&ast.SymbolFlagsClass != 0 && b.ch.getBaseTypeVariableOfClass(symbol) == nil && !(symbol.ValueDeclaration != nil && ast.IsClassLike(symbol.ValueDeclaration) && b.ctx.flags&nodebuilder.FlagsWriteClassExpressionAsTypeLiteral != 0 && (!ast.IsClassDeclaration(symbol.ValueDeclaration) || b.ch.IsSymbolAccessible(symbol, b.ctx.enclosingDeclaration, isInstanceType, false /*shouldComputeAliasesToMakeVisible*/).Accessibility != printer.SymbolAccessibilityAccessible)) || symbol.Flags&(ast.SymbolFlagsEnum|ast.SymbolFlagsValueModule) != 0 || b.shouldWriteTypeOfFunctionSymbol(symbol, t) {
 			return b.symbolToTypeNode(symbol, isInstanceType, nil)
-		} else if b.ctx.visitedTypes.Has(typeId) {
+		} else if b.ctx.visitedTypes.Has(t) {
 			// If type is an anonymous type literal in a type alias declaration, use type alias name
 			typeAlias := getTypeAliasForTypeLiteral(b.ch, t)
 			if typeAlias != nil {
@@ -2501,7 +2500,7 @@ func (b *nodeBuilderImpl) getTypeFromTypeNode(node *ast.TypeNode, noMappedTypes 
 
 func (b *nodeBuilderImpl) typeToTypeNodeOrCircularityElision(t *Type) *ast.TypeNode {
 	if t.flags&TypeFlagsUnion != 0 {
-		if b.ctx.visitedTypes.Has(t.id) {
+		if b.ctx.visitedTypes.Has(t) {
 			if b.ctx.flags&nodebuilder.FlagsAllowAnonymousIdentifier == 0 {
 				b.ctx.encounteredError = true
 				b.ctx.tracker.ReportCyclicStructureError()
@@ -2706,7 +2705,6 @@ func (b *nodeBuilderImpl) typeReferenceToTypeNode(t *Type) *ast.TypeNode {
 }
 
 func (b *nodeBuilderImpl) visitAndTransformType(t *Type, transform func(b *nodeBuilderImpl, t *Type) *ast.TypeNode) *ast.TypeNode {
-	typeId := t.id
 	isConstructorObject := t.objectFlags&ObjectFlagsAnonymous != 0 && t.symbol != nil && t.symbol.Flags&ast.SymbolFlagsClass != 0
 	var id *CompositeSymbolIdentity
 	switch {
@@ -2722,7 +2720,7 @@ func (b *nodeBuilderImpl) visitAndTransformType(t *Type, transform func(b *nodeB
 	// Since instantiations of the same anonymous type have the same symbol, tracking symbols instead
 	// of types allows us to catch circular references to instantiations of the same anonymous type
 
-	key := CompositeTypeCacheIdentity{typeId, b.ctx.flags, b.ctx.internalFlags}
+	key := CompositeTypeCacheIdentity{t, b.ctx.flags, b.ctx.internalFlags}
 	if b.ctx.enclosingDeclaration != nil && b.links.Has(b.ctx.enclosingDeclaration) {
 		links := b.links.Get(b.ctx.enclosingDeclaration)
 		cachedResult, ok := links.serializedTypes[key]
@@ -2747,7 +2745,7 @@ func (b *nodeBuilderImpl) visitAndTransformType(t *Type, transform func(b *nodeB
 		}
 		b.ctx.symbolDepth[*id] = depth + 1
 	}
-	b.ctx.visitedTypes.Add(typeId)
+	b.ctx.visitedTypes.Add(t)
 	prevTrackedSymbols := b.ctx.trackedSymbols
 	b.ctx.trackedSymbols = nil
 	startLength := b.ctx.approximateLength
@@ -2765,7 +2763,7 @@ func (b *nodeBuilderImpl) visitAndTransformType(t *Type, transform func(b *nodeB
 			trackedSymbols: b.ctx.trackedSymbols,
 		}
 	}
-	b.ctx.visitedTypes.Delete(typeId)
+	b.ctx.visitedTypes.Delete(t)
 	if id != nil {
 		b.ctx.symbolDepth[*id] = depth
 	}
