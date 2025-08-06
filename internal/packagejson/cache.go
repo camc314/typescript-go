@@ -129,7 +129,8 @@ func (p *InfoCacheEntry) GetDirectory() string {
 type InfoCache struct {
 	mu                        sync.RWMutex
 	IsReadonly                bool
-	cache                     map[tspath.Path]InfoCacheEntry
+	cacheByFileName           map[string]InfoCacheEntry
+	cacheByPath               map[tspath.Path]InfoCacheEntry
 	currentDirectory          string
 	useCaseSensitiveFileNames bool
 }
@@ -143,21 +144,36 @@ func NewInfoCache(currentDirectory string, useCaseSensitiveFileNames bool) *Info
 
 func (p *InfoCache) Get(packageJsonPath string) *InfoCacheEntry {
 	p.mu.RLock()
-	defer p.mu.RUnlock()
-	key := tspath.ToPath(packageJsonPath, p.currentDirectory, p.useCaseSensitiveFileNames)
-	entry, ok := p.cache[key]
-	if !ok {
-		return nil
+	entry, ok := p.cacheByFileName[packageJsonPath]
+	p.mu.RUnlock()
+	if ok {
+		return &entry
 	}
-	return &entry
+
+	key := tspath.ToPath(packageJsonPath, p.currentDirectory, p.useCaseSensitiveFileNames)
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if entry, ok := p.cacheByPath[key]; ok {
+		// FileName must have mismatched; update this FileName with the result from Path.
+		p.cacheByFileName[packageJsonPath] = entry
+		return &entry
+	}
+
+	return nil
 }
 
 func (p *InfoCache) Set(packageJsonPath string, info *InfoCacheEntry) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	key := tspath.ToPath(packageJsonPath, p.currentDirectory, p.useCaseSensitiveFileNames)
-	if p.cache == nil {
-		p.cache = make(map[tspath.Path]InfoCacheEntry)
+
+	if p.cacheByFileName == nil {
+		p.cacheByFileName = make(map[string]InfoCacheEntry)
+		p.cacheByPath = make(map[tspath.Path]InfoCacheEntry)
 	}
-	p.cache[key] = *info
+
+	key := tspath.ToPath(packageJsonPath, p.currentDirectory, p.useCaseSensitiveFileNames)
+	p.cacheByFileName[packageJsonPath] = *info
+	p.cacheByPath[key] = *info
 }
