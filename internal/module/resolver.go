@@ -1561,7 +1561,7 @@ func (r *resolutionState) getPackageJsonInfo(packageDirectory string, onlyRecord
 			},
 		}
 		if !r.resolver.packageJsonInfoCache.IsReadonly {
-			r.resolver.packageJsonInfoCache.Set(packageJsonPath, result)
+			result = r.resolver.packageJsonInfoCache.Set(packageJsonPath, result)
 		}
 		r.affectingLocations = append(r.affectingLocations, packageJsonPath)
 		return result

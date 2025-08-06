@@ -127,9 +127,8 @@ func (p *InfoCacheEntry) GetDirectory() string {
 }
 
 type InfoCache struct {
-	mu                        sync.RWMutex
 	IsReadonly                bool
-	cache                     map[tspath.Path]InfoCacheEntry
+	cache                     collections.SyncMap[tspath.Path, *InfoCacheEntry]
 	currentDirectory          string
 	useCaseSensitiveFileNames bool
 }
@@ -142,22 +141,13 @@ func NewInfoCache(currentDirectory string, useCaseSensitiveFileNames bool) *Info
 }
 
 func (p *InfoCache) Get(packageJsonPath string) *InfoCacheEntry {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
 	key := tspath.ToPath(packageJsonPath, p.currentDirectory, p.useCaseSensitiveFileNames)
-	entry, ok := p.cache[key]
-	if !ok {
-		return nil
-	}
-	return &entry
+	entry, _ := p.cache.Load(key)
+	return entry
 }
 
-func (p *InfoCache) Set(packageJsonPath string, info *InfoCacheEntry) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+func (p *InfoCache) Set(packageJsonPath string, info *InfoCacheEntry) *InfoCacheEntry {
 	key := tspath.ToPath(packageJsonPath, p.currentDirectory, p.useCaseSensitiveFileNames)
-	if p.cache == nil {
-		p.cache = make(map[tspath.Path]InfoCacheEntry)
-	}
-	p.cache[key] = *info
+	loaded, _ := p.cache.LoadOrStore(key, info)
+	return loaded
 }
